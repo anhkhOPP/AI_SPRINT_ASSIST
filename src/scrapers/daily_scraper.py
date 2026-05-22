@@ -149,7 +149,7 @@ class DailyScraper(BaseScraper):
     def _fetch_rendered_html(self, url: str) -> Optional[str]:
         """
         Dùng Playwright để render trang có JavaScript.
-        Truyền cookies từ requests session → không cần login lại.
+        Playwright tự login vào op_pm (OIDC flow) rồi mở trang cần đọc.
         """
         try:
             from playwright.sync_api import sync_playwright
@@ -160,45 +160,52 @@ class DailyScraper(BaseScraper):
                 "  playwright install chromium"
             )
 
-        # Lấy cookies từ requests session để dùng trong Playwright
-        session_cookies = []
-        for cookie in self.session.cookies:
-            session_cookies.append({
-                "name": cookie.name,
-                "value": cookie.value,
-                "domain": cookie.domain or "10.36.36.63",
-                "path": cookie.path or "/",
-            })
+        base_url = self.cfg.base_url
+        username = self.cfg.username
+        password = self.cfg.password
 
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
                 args=["--ignore-certificate-errors", "--no-sandbox"],
             )
-            context = browser.new_context(
-                ignore_https_errors=True,
-            )
-
-            # Set cookies từ requests session
-            if session_cookies:
-                context.add_cookies(session_cookies)
-
+            context = browser.new_context(ignore_https_errors=True)
             page = context.new_page()
 
             try:
-                page.goto(url, timeout=30000, wait_until="networkidle")
+                # Bước 1: Mở op_pm → redirect về login page
+                page.goto(base_url, timeout=20000, wait_until="domcontentloaded")
 
-                # Chờ bảng daily render xong
+                # Bước 2: Điền form login
+                page.wait_for_selector("input[name='Username']", timeout=10000)
+                page.fill("input[name='Username']", username)
+                page.fill("input[name='Password']", password)
+                page.click("button[value='login']")
+
+                # Bước 3: Chờ redirect về op_pm sau OIDC flow
+                page.wait_for_url(f"**/op_pm/**", timeout=20000)
+                logger.info(f"[Playwright] Đăng nhập thành công, URL: {page.url[:60]}")
+
+                # Bước 4: Mở trang document cần đọc
+                page.goto(url, timeout=20000, wait_until="networkidle")
+
+                # Bước 5: Chờ nội dung daily table render
                 try:
                     page.wait_for_selector("table", timeout=15000)
+                    # Chờ thêm để đảm bảo render xong
+                    page.wait_for_timeout(2000)
                 except Exception:
-                    pass  # Có thể không có bảng (chưa điền)
+                    logger.warning("[Playwright] Timeout chờ bảng, lấy HTML hiện tại")
 
                 html = page.content()
+                logger.info(f"[Playwright] HTML length: {len(html)}")
+                return html
+
+            except Exception as e:
+                logger.error(f"[Playwright] Lỗi: {e}")
+                return None
             finally:
                 browser.close()
-
-        return html
 
     def _parse_daily_document(
         self, html: str, target_date: date, doc_url: str
