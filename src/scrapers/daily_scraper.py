@@ -108,21 +108,16 @@ class DailyScraper(BaseScraper):
         base = self.cfg.base_url.rstrip("/")
 
         # Parse JSON navigation data nhúng trong HTML
-        # Format: {"id":"uuid","name":"Daily Meeting X - DD-MMM-YYYY",...}
-        id_pattern = re.compile(r'"id"\s*:\s*"([0-9a-f\-]{36})"')
-        name_pattern = re.compile(r'"name"\s*:\s*"([^"]*)"')
+        # Format: {"id":"UUID","parentId":"...","htmlSectionId":"...","name":" Daily Meeting X - DD-MMM-YYYY",...}
+        # Dùng \{ để chỉ match "id" ở đầu object JSON (tránh nhầm parentId, htmlSectionId)
+        pattern = re.compile(
+            r'\{"id":"([0-9a-f\-]{36})"[^}]{0,400}"name":"([^"]*)"',
+            re.DOTALL
+        )
 
-        # Tìm tất cả JSON objects chứa "Daily Meeting"
-        chunks = re.split(r'(?="id"\s*:\s*"[0-9a-f\-]{36}")', html)
-
-        for chunk in chunks:
-            id_match = id_pattern.search(chunk[:200])
-            name_match = name_pattern.search(chunk[:200])
-            if not id_match or not name_match:
-                continue
-
-            nav_id = id_match.group(1)
-            name = name_match.group(1)
+        for match in pattern.finditer(html):
+            nav_id = match.group(1)
+            name = match.group(2).strip()  # Strip dấu cách đầu/cuối
 
             if "daily meeting" not in name.lower():
                 continue
