@@ -1,15 +1,15 @@
 """
 Daily Standup Scraper - Kiểm tra ai chưa điền daily.
 
-Trang cha cố định:
-  https://10.36.36.63:8618/op_pm/HtmlDocument/Detail/578820bf-...
+Trang Print URL trả về toàn bộ HTML tĩnh chứa tất cả daily meetings.
+Không cần Playwright - requests đọc được trực tiếp.
 
 Luồng:
-1. Tìm docNavId của ngày hôm nay từ JSON navigation trong HTML trang cha
-2. Dùng Playwright (headless Chromium) để render trang document
-   (nội dung bảng được load bằng JavaScript - requests không đọc được)
-3. Parse bảng: Member | Hôm qua | Hôm nay | Blockers | Adhoc
-4. Ai có cả 2 cột "Hôm qua" + "Hôm nay" đều trống = chưa điền
+1. GET Print URL của document → nhận HTML tĩnh 1.6MB chứa tất cả meetings
+2. Tìm vị trí ngày cần check (VD: "22-May-2026")
+3. Tìm <table sau vị trí đó → extract HTML bảng
+4. Parse bảng: Member | Hôm qua | Hôm nay | Blockers | Adhoc
+5. Ai có cả 2 cột "Hôm qua" + "Hôm nay" đều trống = chưa điền
 """
 import re
 from datetime import date
@@ -52,15 +52,7 @@ class DailyScraper(BaseScraper):
     def fetch_daily_data(self, target_date: Optional[date] = None) -> Dict[str, Any]:
         """
         Lấy dữ liệu daily standup của ngày chỉ định.
-
-        Returns:
-            {
-                "date": "2026-05-22",
-                "document_url": "...",
-                "submitted": [{"name": "...", "position": "..."}],
-                "missing": [{"name": "...", "position": "..."}],
-                "entries": [{"name": ..., "yesterday": ..., "today": ..., ...}]
-            }
+        Dùng Print URL để lấy HTML tĩnh chứa toàn bộ các meetings.
         """
         if target_date is None:
             target_date = date.today()
@@ -69,27 +61,18 @@ class DailyScraper(BaseScraper):
             logger.warning("[Daily] INTERNAL_DAILY_PARENT_URL chưa cấu hình → dùng mock data")
             return self._mock_data(target_date)
 
-        # Bước 1: Tìm URL document của ngày hôm nay
-        doc_url = self._find_today_document(target_date)
-        if not doc_url:
-            logger.warning(f"[Daily] Không tìm thấy document ngày {target_date}")
+        # Lấy parent document ID từ URL
+        parent_id = self.parent_url.split("/")[-1].split("?")[0]
+        base = self.cfg.base_url.rstrip("/")
+        print_url = f"{base}/HtmlDocument/Print/{parent_id}"
+
+        logger.info(f"[Daily] GET Print URL: {print_url}")
+        resp = self.get(print_url)
+        if not resp:
+            logger.error("[Daily] Không tải được Print URL")
             return self._not_found_result(target_date)
 
-        # Bước 2: Render document bằng Playwright (nội dung load bằng JS)
-        logger.info(f"[Daily] Render document bằng Playwright: {doc_url}")
-        try:
-            rendered_html = self._fetch_rendered_html(doc_url)
-        except ImportError as e:
-            logger.error(f"[Daily] {e}")
-            return self._not_found_result(target_date)
-        except Exception as e:
-            logger.error(f"[Daily] Playwright lỗi: {e}")
-            return self._not_found_result(target_date)
-
-        if not rendered_html:
-            return self._not_found_result(target_date)
-
-        return self._parse_daily_document(rendered_html, target_date, doc_url)
+        return self._parse_print_html(resp.text, target_date, print_url)
 
     # ------------------------------------------------------------------
     # Bước 1: Tìm document của hôm nay trong sidebar
@@ -143,7 +126,106 @@ class DailyScraper(BaseScraper):
         return None
 
     # ------------------------------------------------------------------
-    # Bước 2: Render trang bằng Playwright + parse bảng daily
+    # Parse Print HTML (toàn bộ document tĩnh)
+    # ------------------------------------------------------------------
+
+    def _parse_print_html(self, html: str, target_date: date, doc_url: str) -> Dict[str, Any]:
+        """
+        Parse HTML từ Print URL.
+        Tìm ngày target_date → lấy <table ngay sau đó → parse bảng.
+        """
+        target_str = target_date.strftime(self.DATE_FORMAT)  # VD: "22-May-2026"
+
+        # Tìm vị trí của ngày cần check
+        idx = html.find(target_str)
+        if idx < 0:
+            logger.warning(f"[Daily] Không tìm thấy '{target_str}' trong Print HTML")
+            return self._not_found_result(target_date)
+
+        logger.info(f"[Daily] Tìm thấy '{target_str}' tại vị trí {idx}")
+
+        # Tìm <table sau vị trí ngày đó
+        table_start = html.find("<table", idx)
+        if table_start < 0:
+            logger.warning(f"[Daily] Không tìm thấy <table sau '{target_str}'")
+            return self._not_found_result(target_date)
+
+        # Tìm </table> tương ứng (có thể lồng nhau)
+        table_end = html.find("</table>", table_start)
+        if table_end < 0:
+            return self._not_found_result(target_date)
+        table_end += len("</table>")
+
+        table_html = html[table_start:table_end]
+        logger.info(f"[Daily] Extracted table HTML: {len(table_html)} ký tự")
+
+        # Parse bảng với BeautifulSoup
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(f"<html><body>{table_html}</body></html>", "html.parser")
+        table = soup.find("table")
+
+        if not table:
+            logger.warning("[Daily] Không parse được bảng từ HTML")
+            return self._not_found_result(target_date)
+
+        return self._parse_table(table, target_date, doc_url)
+
+    def _parse_table(self, table, target_date: date, doc_url: str) -> Dict[str, Any]:
+        """Parse bảng daily standup đã tìm thấy."""
+        col_idx = self._detect_daily_columns(table)
+        entries = []
+        submitted = []
+        missing = []
+
+        rows = table.find_all("tr")[1:]  # Bỏ header
+        for row in rows:
+            cells = row.find_all(["td", "th"])
+            if not cells:
+                continue
+
+            name = self._get_cell_text(cells, col_idx["member"]).strip()
+            if not name:
+                continue
+
+            yesterday = self._get_cell_text(cells, col_idx["yesterday"])
+            today = self._get_cell_text(cells, col_idx["today"])
+            blockers = self._get_cell_text(cells, col_idx.get("blockers", -1))
+
+            # Đã điền nếu ít nhất 1 trong 2 cột có nội dung thực
+            is_submitted = bool(
+                yesterday.strip() and yesterday.strip() not in ("", "\xa0", "&nbsp;")
+                or today.strip() and today.strip() not in ("", "\xa0", "&nbsp;")
+            )
+
+            entry = {
+                "name": name,
+                "yesterday": yesterday,
+                "today": today,
+                "blockers": blockers,
+                "submitted": is_submitted,
+            }
+            entries.append(entry)
+
+            member_info = self._get_member_info(name)
+            person = {"name": name, "position": member_info.get("position", "")}
+
+            if is_submitted:
+                submitted.append(person)
+            else:
+                missing.append(person)
+
+        logger.info(f"[Daily] {len(submitted)} đã điền, {len(missing)} chưa điền")
+
+        return {
+            "date": target_date.strftime("%Y-%m-%d"),
+            "document_url": doc_url,
+            "submitted": submitted,
+            "missing": missing,
+            "entries": entries,
+        }
+
+    # ------------------------------------------------------------------
+    # Bước 2: Render trang bằng Playwright (backup - không cần nữa)
     # ------------------------------------------------------------------
 
     def _fetch_rendered_html(self, url: str) -> Optional[str]:
