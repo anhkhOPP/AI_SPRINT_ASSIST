@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Kiều Hoàng Anh",
+    "email": "hoanganh@company.com",
+    "position": "Developer",
+    "chat_id": ""
+  },
+  {
+    "name": "Phạm Chí Thành",
+    "email": "chithanh@company.com",
+    "position": "Developer",
+    "chat_id": ""
+  },
+  {
+    "name": "Nguyễn Thành Danh",
+    "email": "thanhdanh@company.com",
+    "position": "Developer",
+    "chat_id": ""
+  },
+  {
+    "name": "Nguyễn Trung Hiếu",
+    "email": "trunghieu@company.com",
+    "position": "QA",
+    "chat_id": ""
+  },
+  {
+    "name": "Nguyễn Quang Huy",
+    "email": "quanghuy@company.com",
+    "position": "QA",
+    "chat_id": ""
+  },
+  {
+    "name": "Phan Quốc Hùng",
+    "email": "quochung@company.com",
+    "position": "Tech Lead",
+    "chat_id": ""
+  }
+]

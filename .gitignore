@@ -5,8 +5,7 @@
 
 # Credentials (NEVER commit)
 credentials/
-*.json
-!.env.example
+credentials/*.json
 
 # Python
 __pycache__/
@@ -54,7 +53,7 @@ htmlcov/
 .tox/
 .mypy_cache/
 
-# Runtime data
+# Runtime data (sinh ra khi chạy)
 data/
 logs/
 *.log
