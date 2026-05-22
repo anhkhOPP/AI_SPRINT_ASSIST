@@ -12,8 +12,7 @@ google-api-python-client==2.120.0
 # Web scraping
 beautifulsoup4==4.12.3
 lxml==5.1.0
-selenium==4.19.0
-playwright==1.43.0
+playwright>=1.43.0
 httpx==0.27.0
 
 # Web server (for bot webhook)

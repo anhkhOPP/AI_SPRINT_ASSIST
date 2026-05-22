@@ -5,11 +5,11 @@ Trang cha cố định:
   https://10.36.36.63:8618/op_pm/HtmlDocument/Detail/578820bf-...
 
 Luồng:
-1. Truy cập trang cha → parse sidebar
-2. Tìm link có tên "Daily Meeting X - DD-MMM-YYYY" khớp với hôm nay
-3. Truy cập document đó
-4. Parse bảng: Member | Hôm qua | Hôm nay | Blockers | Adhoc
-5. Ai có cả 2 cột "Hôm qua" + "Hôm nay" đều trống = chưa điền
+1. Tìm docNavId của ngày hôm nay từ JSON navigation trong HTML trang cha
+2. Dùng Playwright (headless Chromium) để render trang document
+   (nội dung bảng được load bằng JavaScript - requests không đọc được)
+3. Parse bảng: Member | Hôm qua | Hôm nay | Blockers | Adhoc
+4. Ai có cả 2 cột "Hôm qua" + "Hôm nay" đều trống = chưa điền
 """
 import re
 from datetime import date
@@ -75,14 +75,21 @@ class DailyScraper(BaseScraper):
             logger.warning(f"[Daily] Không tìm thấy document ngày {target_date}")
             return self._not_found_result(target_date)
 
-        # Bước 2: Parse bảng daily
-        logger.info(f"[Daily] Đọc document: {doc_url}")
-        resp = self.get(doc_url)
-        if not resp:
-            logger.error(f"[Daily] Không tải được document: {doc_url}")
+        # Bước 2: Render document bằng Playwright (nội dung load bằng JS)
+        logger.info(f"[Daily] Render document bằng Playwright: {doc_url}")
+        try:
+            rendered_html = self._fetch_rendered_html(doc_url)
+        except ImportError as e:
+            logger.error(f"[Daily] {e}")
+            return self._not_found_result(target_date)
+        except Exception as e:
+            logger.error(f"[Daily] Playwright lỗi: {e}")
             return self._not_found_result(target_date)
 
-        return self._parse_daily_document(resp.text, target_date, doc_url)
+        if not rendered_html:
+            return self._not_found_result(target_date)
+
+        return self._parse_daily_document(rendered_html, target_date, doc_url)
 
     # ------------------------------------------------------------------
     # Bước 1: Tìm document của hôm nay trong sidebar
@@ -136,8 +143,62 @@ class DailyScraper(BaseScraper):
         return None
 
     # ------------------------------------------------------------------
-    # Bước 2: Parse bảng daily trong document
+    # Bước 2: Render trang bằng Playwright + parse bảng daily
     # ------------------------------------------------------------------
+
+    def _fetch_rendered_html(self, url: str) -> Optional[str]:
+        """
+        Dùng Playwright để render trang có JavaScript.
+        Truyền cookies từ requests session → không cần login lại.
+        """
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            raise ImportError(
+                "Playwright chưa được cài. Chạy:\n"
+                "  pip install playwright\n"
+                "  playwright install chromium"
+            )
+
+        # Lấy cookies từ requests session để dùng trong Playwright
+        session_cookies = []
+        for cookie in self.session.cookies:
+            session_cookies.append({
+                "name": cookie.name,
+                "value": cookie.value,
+                "domain": cookie.domain or "10.36.36.63",
+                "path": cookie.path or "/",
+            })
+
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--ignore-certificate-errors", "--no-sandbox"],
+            )
+            context = browser.new_context(
+                ignore_https_errors=True,
+            )
+
+            # Set cookies từ requests session
+            if session_cookies:
+                context.add_cookies(session_cookies)
+
+            page = context.new_page()
+
+            try:
+                page.goto(url, timeout=30000, wait_until="networkidle")
+
+                # Chờ bảng daily render xong
+                try:
+                    page.wait_for_selector("table", timeout=15000)
+                except Exception:
+                    pass  # Có thể không có bảng (chưa điền)
+
+                html = page.content()
+            finally:
+                browser.close()
+
+        return html
 
     def _parse_daily_document(
         self, html: str, target_date: date, doc_url: str
