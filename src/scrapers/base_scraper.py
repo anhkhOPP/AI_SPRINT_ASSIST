@@ -84,30 +84,26 @@ class BaseScraper(ABC):
 
             logger.debug(f"[Auth] POST fields: {[k for k in form_data if 'pass' not in k.lower()]}")
 
-            # --- Bước 3: POST credentials, KHÔNG follow redirect ---
+            # --- Bước 3: POST credentials với allow_redirects=True ---
+            # requests sẽ follow redirect tới trang OIDC callback (status=200)
             r2 = self.session.post(
                 login_page_url,
                 data=form_data,
                 timeout=20,
-                allow_redirects=False,  # Tự xử lý redirect để không bỏ sót OIDC form
+                allow_redirects=True,
             )
-            logger.debug(f"[Auth] POST login → status={r2.status_code} location={r2.headers.get('Location','')}")
+            logger.debug(f"[Auth] Sau POST login: url={r2.url} status={r2.status_code}")
 
-            # Follow redirects thủ công cho đến khi gặp response 200
-            current_resp = self._follow_redirects(r2, max_steps=10)
-            if current_resp is None:
-                logger.error("[Auth] Không thể follow redirect sau login")
-                return False
+            current_resp = r2
 
-            logger.debug(f"[Auth] Sau redirect: {current_resp.url} status={current_resp.status_code}")
-
-            # --- Bước 4 & 5: Nếu gặp OIDC form_post → submit ---
+            # --- Bước 4 & 5: Nếu gặp OIDC form_post → submit thủ công ---
+            # Trang callback chứa form auto-submit về /signin-oidc
+            # requests không chạy JS nên phải submit tay
             if current_resp.status_code == 200:
                 oidc_form = self._find_oidc_form(current_resp.text)
                 if oidc_form:
                     action_url, oidc_data = oidc_form
                     logger.info(f"[Auth] OIDC form_post → {action_url}")
-
                     r3 = self.session.post(
                         action_url,
                         data=oidc_data,
@@ -116,6 +112,8 @@ class BaseScraper(ABC):
                     )
                     current_resp = r3
                     logger.debug(f"[Auth] Sau signin-oidc: {current_resp.url} status={current_resp.status_code}")
+                else:
+                    logger.debug(f"[Auth] Không có OIDC form (có thể đã logged in), URL: {current_resp.url}")
 
             # --- Bước 6: Kiểm tra đã vào được op_pm chưa ---
             if self._is_logged_in(current_resp):
