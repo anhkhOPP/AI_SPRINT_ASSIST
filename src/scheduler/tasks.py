@@ -232,8 +232,9 @@ class TaskScheduler:
             review_date = datetime.strptime(event.scheduled_date, "%Y-%m-%d")
             date_display = review_date.strftime("%d/%m/%Y") + f" {event.scheduled_time}"
 
+            meeting_room = getattr(event, "meeting_room", "")
             msg = MessageTemplates.sprint_review_prep(
-                sprint.name, date_display, days_until, event.meeting_link
+                sprint.name, date_display, days_until, event.meeting_link, meeting_room
             )
             self.bot.notify_sprint_review_prep(msg)
             logger.info(f"[Task] ✅ Nhắc chuẩn bị Sprint Review (còn {days_until} ngày)")

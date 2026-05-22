@@ -18,7 +18,7 @@ class TestParseEventCommand:
     def test_parse_full_command_with_link(self):
         result = _parse_event_command("/set_review 26/05 14:00 https://meet.google.com/abc")
         assert result is not None
-        date_str, time_str, link = result
+        date_str, time_str, link, room = result
         assert "05-26" in date_str or date_str.endswith("-05-26")
         assert time_str == "14:00"
         assert link == "https://meet.google.com/abc"
@@ -26,7 +26,7 @@ class TestParseEventCommand:
     def test_parse_command_without_link(self):
         result = _parse_event_command("/set_review 26/05 14:00")
         assert result is not None
-        date_str, time_str, link = result
+        date_str, time_str, link, room = result
         assert time_str == "14:00"
         assert link == ""
 

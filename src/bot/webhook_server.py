@@ -72,11 +72,11 @@ def _cmd_set_review(text: str, sender: str) -> str:
     if not parsed:
         return (
             "❌ Cú pháp sai. Dùng:\n"
-            "`/set_review DD/MM HH:MM [link_meeting]`\n\n"
-            "_Ví dụ: `/set_review 26/05 14:00 https://meet.google.com/xxx`_"
+            "`/set_review DD/MM HH:MM [phòng_họp] [link]`\n\n"
+            "_Ví dụ: `/set_review 26/05 14:00 Phòng A3 https://meet.google.com/xxx`_"
         )
 
-    event_date, event_time, meeting_link = parsed
+    event_date, event_time, meeting_link, meeting_room = parsed
     sprint = get_sprint_manager().get_current_sprint()
 
     get_sprint_manager().update_sprint_event(
@@ -89,13 +89,13 @@ def _cmd_set_review(text: str, sender: str) -> str:
 
     # Xác nhận lại với PM
     from src.reminders.messages import MessageTemplates
-    confirm_msg = MessageTemplates.confirm_sprint_event("review", event_date, event_time, meeting_link)
+    confirm_msg = MessageTemplates.confirm_sprint_event("review", event_date, event_time, meeting_link, meeting_room)
 
     # Thông báo vào group nhóm
     from src.bot.google_chat import GoogleChatBot
     bot = GoogleChatBot()
     announce_msg = MessageTemplates.announce_sprint_event(
-        sprint.name, "review", event_date, event_time, meeting_link
+        sprint.name, "review", event_date, event_time, meeting_link, meeting_room
     )
     bot.send_group(announce_msg)
 
@@ -113,7 +113,7 @@ def _cmd_set_planning(text: str, sender: str) -> str:
             "_Ví dụ: `/set_planning 27/05 09:00 https://meet.google.com/xxx`_"
         )
 
-    event_date, event_time, meeting_link = parsed
+    event_date, event_time, meeting_link, meeting_room = parsed
     sprint = get_sprint_manager().get_current_sprint()
 
     get_sprint_manager().update_sprint_event(
@@ -175,10 +175,14 @@ def _help_text() -> str:
 
 def _parse_event_command(text: str):
     """
-    Parse lệnh: /set_review DD/MM HH:MM [link]
-    Returns: (event_date "YYYY-MM-DD", event_time "HH:MM", meeting_link) hoặc None
+    Parse lệnh: /set_review DD/MM HH:MM [phòng_họp] [link]
+    Returns: (event_date, event_time, meeting_link, meeting_room) hoặc None
+
+    Ví dụ:
+      /set_review 26/05 14:00 Phòng A3 https://meet.google.com/xxx
+      /set_review 26/05 14:00 https://meet.google.com/xxx
+      /set_review 26/05 14:00 Phòng B2
     """
-    # Bỏ tên lệnh
     parts = text.split(None, 1)
     if len(parts) < 2:
         return None
@@ -193,8 +197,6 @@ def _parse_event_command(text: str):
     day = int(date_match.group(1))
     month = int(date_match.group(2))
     year = datetime.now().year
-
-    # Nếu tháng đã qua thì sang năm sau
     now = datetime.now()
     if month < now.month or (month == now.month and day < now.day):
         year += 1
@@ -208,14 +210,20 @@ def _parse_event_command(text: str):
     time_match = re.search(r"(\d{1,2}):(\d{2})", args)
     if not time_match:
         return None
-
     event_time = f"{int(time_match.group(1)):02d}:{time_match.group(2)}"
 
     # Tìm link (optional)
     link_match = re.search(r"https?://\S+", args)
     meeting_link = link_match.group(0) if link_match else ""
 
-    return event_date, event_time, meeting_link
+    # Tìm phòng họp (optional) - text không phải link, không phải ngày/giờ
+    remaining = args
+    remaining = re.sub(r"\d{1,2}[/\-]\d{1,2}", "", remaining)  # bỏ ngày
+    remaining = re.sub(r"\d{1,2}:\d{2}", "", remaining)          # bỏ giờ
+    remaining = re.sub(r"https?://\S+", "", remaining)            # bỏ link
+    meeting_room = remaining.strip().strip(",").strip()
+
+    return event_date, event_time, meeting_link, meeting_room
 
 
 # ------------------------------------------------------------------

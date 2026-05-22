@@ -178,7 +178,11 @@ class MessageTemplates:
 
     @staticmethod
     def sprint_review_prep(
-        sprint_name: str, review_date: str, days_until: int, meeting_link: str = ""
+        sprint_name: str,
+        review_date: str,
+        days_until: int,
+        meeting_link: str = "",
+        meeting_room: str = "",
     ) -> str:
         if days_until == 0:
             urgency = "🔴 *HÔM NAY* là ngày Sprint Review!"
@@ -189,20 +193,19 @@ class MessageTemplates:
         else:
             urgency = f"🟢 Còn *{days_until} ngày* nữa là Sprint Review."
 
+        time_line = f"⏰ Thời gian họp Sprint Review: *{review_date}*"
+        room_line = f"\n🏠 Phòng họp: *{meeting_room}*" if meeting_room else ""
         link_line = f"\n🔗 Link meeting: {meeting_link}" if meeting_link else ""
 
         return (
+            f"@all\n\n"
             f"🚀 *CHUẨN BỊ SPRINT REVIEW - {sprint_name}*\n\n"
-            f"{urgency}\n"
-            f"📅 Ngày họp: *{review_date}*{link_line}\n\n"
-            "✅ *Checklist chuẩn bị:*\n"
-            "• [ ] Demo các feature đã hoàn thành\n"
-            "• [ ] Chuẩn bị slide/báo cáo kết quả\n"
-            "• [ ] Cập nhật trạng thái tất cả tasks\n"
-            "• [ ] Thu thập metrics (velocity, burndown)\n"
-            "• [ ] Liệt kê done / not done\n"
-            "• [ ] Test lại lần cuối trước demo\n\n"
-            "_Chuẩn bị kỹ = Sprint Review thành công!_ 🎯"
+            f"{urgency}\n\n"
+            f"Mọi người review task sprint vừa rồi nhé:\n\n"
+            f"1️⃣ Kiểm tra trạng thái US, bổ sung evident\n"
+            f"2️⃣ Review lại daily, logwork\n"
+            f"3️⃣ Chuẩn bị demo\n\n"
+            f"{time_line}{room_line}{link_line}"
         )
 
     # ================================================================
@@ -211,34 +214,33 @@ class MessageTemplates:
 
     @staticmethod
     def confirm_sprint_event(
-        event_type: str, event_date: str, event_time: str, meeting_link: str = ""
+        event_type: str, event_date: str, event_time: str,
+        meeting_link: str = "", meeting_room: str = ""
     ) -> str:
         type_label = "Sprint Review" if event_type == "review" else "Sprint Planning"
+        room_line = f"\n🏠 Phòng họp: *{meeting_room}*" if meeting_room else ""
         link_line = f"\n🔗 Link: {meeting_link}" if meeting_link else ""
 
         return (
             f"✅ *Đã lưu lịch {type_label}!*\n\n"
             f"📅 Ngày: *{event_date}*\n"
-            f"🕑 Giờ: *{event_time}*{link_line}\n\n"
+            f"🕑 Giờ: *{event_time}*{room_line}{link_line}\n\n"
             "Bot sẽ nhắc nhóm chuẩn bị đúng hạn 🔔"
         )
-
-    # ================================================================
-    # THÔNG BÁO LỊCH VÀO GROUP (sau khi PM xác nhận)
-    # ================================================================
 
     @staticmethod
     def announce_sprint_event(
         sprint_name: str, event_type: str, event_date: str,
-        event_time: str, meeting_link: str = ""
+        event_time: str, meeting_link: str = "", meeting_room: str = ""
     ) -> str:
         type_label = "Sprint Review" if event_type == "review" else "Sprint Planning"
         emoji = "🎯" if event_type == "review" else "📋"
+        room_line = f"\n🏠 Phòng họp: *{meeting_room}*" if meeting_room else ""
         link_line = f"\n🔗 Link meeting: {meeting_link}" if meeting_link else ""
 
         return (
             f"{emoji} *LỊCH {type_label.upper()} - {sprint_name}*\n\n"
             f"📅 Ngày: *{event_date}*\n"
-            f"🕑 Giờ: *{event_time}*{link_line}\n\n"
+            f"🕑 Giờ: *{event_time}*{room_line}{link_line}\n\n"
             "Mọi người note lịch vào calendar nhé! 📆"
         )
