@@ -90,41 +90,54 @@ class DailyScraper(BaseScraper):
 
     def _find_today_document(self, target_date: date) -> Optional[str]:
         """
-        Truy cập trang cha → parse sidebar → tìm link của ngày hôm nay.
+        Tìm document daily meeting của ngày chỉ định.
+
+        Navigation tree được nhúng dưới dạng JSON trong HTML trang cha.
+        Mỗi entry có dạng: {"id":"uuid","name":"Daily Meeting X - DD-MMM-YYYY",...}
         """
         logger.info(f"[Daily] Tìm document ngày {target_date} trong: {self.parent_url}")
         resp = self.get(self.parent_url)
         if not resp:
             return None
 
-        soup = self.parse_html(resp.text)
         target_str = target_date.strftime(self.DATE_FORMAT)  # VD: "22-May-2026"
+        html = resp.text
 
-        # Tìm tất cả link trong sidebar/navigation
-        # Sidebar thường có class như "sidebar", "tree", "nav", "document-list"
-        sidebar = (
-            soup.find(["nav", "aside", "div"], {"class": re.compile(r"sidebar|tree|nav|menu|document", re.I)})
-            or soup.find(id=re.compile(r"sidebar|tree|nav|menu", re.I))
-            or soup  # fallback: tìm trong toàn trang
-        )
+        # Lấy parent document ID từ URL
+        parent_id = self.parent_url.split("/")[-1].split("?")[0]
+        base = self.cfg.base_url.rstrip("/")
 
-        # Tìm link có text khớp với ngày hôm nay
-        for link in sidebar.find_all("a", href=True):
-            link_text = link.get_text(strip=True)
+        # Parse JSON navigation data nhúng trong HTML
+        # Format: {"id":"uuid","name":"Daily Meeting X - DD-MMM-YYYY",...}
+        id_pattern = re.compile(r'"id"\s*:\s*"([0-9a-f\-]{36})"')
+        name_pattern = re.compile(r'"name"\s*:\s*"([^"]*)"')
 
-            # Kiểm tra tên document có khớp pattern không
-            if not re.search(r"Daily Meeting", link_text, re.I):
+        # Tìm tất cả JSON objects chứa "Daily Meeting"
+        chunks = re.split(r'(?="id"\s*:\s*"[0-9a-f\-]{36}")', html)
+
+        for chunk in chunks:
+            id_match = id_pattern.search(chunk[:200])
+            name_match = name_pattern.search(chunk[:200])
+            if not id_match or not name_match:
                 continue
 
-            # Kiểm tra ngày trong tên
-            if target_str.lower() in link_text.lower():
-                href = link["href"]
-                # Tạo URL đầy đủ nếu là relative URL
-                if href.startswith("http"):
-                    return href
-                return urljoin(self.base_url + "/", href.lstrip("/"))
+            nav_id = id_match.group(1)
+            name = name_match.group(1)
 
-        logger.warning(f"[Daily] Không tìm thấy link chứa '{target_str}' trong sidebar")
+            if "daily meeting" not in name.lower():
+                continue
+
+            if target_str.lower() in name.lower():
+                url = f"{base}/HtmlDocument/Detail/{parent_id}?docNavId={nav_id}"
+                logger.info(f"[Daily] Tìm thấy: {name!r} → {url}")
+                return url
+
+        logger.warning(f"[Daily] Không tìm thấy document '{target_str}'")
+
+        # Debug: in vài document gần nhất
+        recent = re.findall(r'"name"\s*:\s*"(Daily Meeting[^"]+)"', html, re.IGNORECASE)
+        if recent:
+            logger.debug(f"[Daily] Documents có sẵn (cuối): {recent[-5:]}")
         return None
 
     # ------------------------------------------------------------------
