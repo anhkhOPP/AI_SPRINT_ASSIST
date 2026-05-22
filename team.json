@@ -1,38 +1,44 @@
 [
   {
     "name": "Kiều Hoàng Anh",
-    "email": "anhkh@onepay.vn",
+    "email": "hoanganh@onepay.vn",
     "position": "Team Lead",
-    "chat_id": ""
+    "uid": "8e9af5c2-db99-4ef0-9e24-bfbaa0087f57",
+    "display_name": "Hoang Anh"
   },
   {
     "name": "Phạm Chí Thành",
-    "email": "thanhpc@onepay.vn",
+    "email": "chithanh@onepay.vn",
     "position": "Developer",
-    "chat_id": ""
+    "uid": "79966c10-b87a-49aa-b7a7-8aa571b6b36f",
+    "display_name": "Chi Thanh"
   },
   {
     "name": "Nguyễn Thành Danh",
-    "email": "danhnt@onepay.vn",
+    "email": "thanhdanh@onepay.vn",
     "position": "Developer",
-    "chat_id": ""
+    "uid": "926fa737-5334-4165-8819-cbf5bc4fd990",
+    "display_name": "Thanh Danh"
   },
   {
     "name": "Nguyễn Trung Hiếu",
     "email": "hieunt@onepay.vn",
     "position": "Developer",
-    "chat_id": ""
+    "uid": "b595c7e8-bef5-4f4a-9c2b-3dca741e2948",
+    "display_name": "HieuNT"
   },
   {
     "name": "Nguyễn Quang Huy",
-    "email": "huyng@onepay.vn",
+    "email": "quanghuy@onepay.vn",
     "position": "Developer",
-    "chat_id": ""
+    "uid": "c49d4712-d603-4953-b74e-eaea5f9065a2",
+    "display_name": "Hoang Viet"
   },
   {
     "name": "Phan Quốc Hưng",
-    "email": "hungpq@onepay.vn",
+    "email": "quochung@onepay.vn",
     "position": "QA",
-    "chat_id": ""
+    "uid": "c7b77214-50c8-4ce7-b7bf-f72b0c8df80c",
+    "display_name": "Quoc Hung"
   }
 ]
