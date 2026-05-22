@@ -59,46 +59,58 @@ class BaseScraper(ABC):
 
     def login(self) -> bool:
         """
-        Đăng nhập vào op_pm bằng form HTML.
+        Đăng nhập vào op_pm (ASP.NET Identity Server / OpenID Connect).
 
-        Tự động:
-        1. GET trang login để lấy CSRF token nếu có
-        2. POST username + password
-        3. Kiểm tra kết quả đăng nhập
+        Luồng:
+        1. GET base URL → tự redirect về trang login
+        2. Lấy CSRF token + ReturnUrl từ hidden fields trong form
+        3. POST Username + Password + hidden fields
+        4. Server redirect về op_pm qua OIDC callback
         """
-        login_url = self.cfg.get_login_url()
-        logger.info(f"[Auth] Đang đăng nhập: {login_url}")
+        base_url = self.cfg.base_url
+        logger.info(f"[Auth] Đang đăng nhập vào: {base_url}")
 
         try:
-            # Bước 1: GET trang login, lấy CSRF token
-            resp = self.session.get(login_url, timeout=15, allow_redirects=True)
-            csrf_token = self._extract_csrf(resp.text)
+            # Bước 1: GET base URL, sẽ tự redirect về trang login
+            resp = self.session.get(base_url, timeout=15, allow_redirects=True)
+            actual_login_url = resp.url  # URL thực của trang login sau redirect
+            logger.debug(f"[Auth] Trang login thực tế: {actual_login_url}")
 
-            # Bước 2: POST thông tin đăng nhập
-            form_data = {
-                self.cfg.login_field_username: self.cfg.username,
-                self.cfg.login_field_password: self.cfg.password,
-            }
-            if csrf_token:
-                # Thử các tên CSRF field phổ biến
-                for csrf_field in ["csrf_token", "_token", "csrfmiddlewaretoken", "__RequestVerificationToken"]:
-                    form_data[csrf_field] = csrf_token
+            soup = BeautifulSoup(resp.text, "lxml")
 
+            # Bước 2: Lấy tất cả hidden fields (CSRF token, ReturnUrl, ...)
+            form_data = {}
+            form = soup.find("form")
+            if form:
+                for hidden in form.find_all("input", {"type": "hidden"}):
+                    name = hidden.get("name", "")
+                    value = hidden.get("value", "")
+                    if name:
+                        form_data[name] = value
+                        logger.debug(f"[Auth] Hidden field: {name}")
+
+            # Bước 3: Điền thông tin đăng nhập
+            form_data[self.cfg.login_field_username] = self.cfg.username
+            form_data[self.cfg.login_field_password] = self.cfg.password
+            form_data["RememberLogin"] = "true"
+            form_data["button"] = "login"
+
+            # Bước 4: POST form
             login_resp = self.session.post(
-                login_url,
+                actual_login_url,
                 data=form_data,
-                timeout=15,
+                timeout=20,
                 allow_redirects=True,
             )
 
-            # Bước 3: Kiểm tra đăng nhập thành công
+            # Bước 5: Kiểm tra kết quả
             if self._is_login_successful(login_resp):
                 self._logged_in = True
                 logger.info(f"[Auth] ✅ Đăng nhập thành công: {self.cfg.username}")
                 return True
 
             logger.error(f"[Auth] ❌ Đăng nhập thất bại (status={login_resp.status_code})")
-            logger.debug(f"[Auth] Response URL sau login: {login_resp.url}")
+            logger.debug(f"[Auth] URL sau login: {login_resp.url}")
             return False
 
         except requests.RequestException as e:
