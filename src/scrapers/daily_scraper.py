@@ -1,332 +1,314 @@
 """
-Scraper cho trang web Daily Standup nội bộ.
+Daily Standup Scraper - Kiểm tra ai chưa điền daily.
 
-Kiểm tra ai đã điền daily standup form hôm nay.
-Hỗ trợ: HTML table, JSON API, Google Forms, Confluence, custom form.
+Trang cha cố định:
+  https://10.36.36.63:8618/op_pm/HtmlDocument/Detail/578820bf-...
+
+Luồng:
+1. Truy cập trang cha → parse sidebar
+2. Tìm link có tên "Daily Meeting X - DD-MMM-YYYY" khớp với hôm nay
+3. Truy cập document đó
+4. Parse bảng: Member | Hôm qua | Hôm nay | Blockers | Adhoc
+5. Ai có cả 2 cột "Hôm qua" + "Hôm nay" đều trống = chưa điền
 """
-import os
-from datetime import date, datetime
-from typing import Dict, Any, List, Optional
+import re
+from datetime import date
+from typing import Dict, List, Optional, Any
+from urllib.parse import urljoin
 
 from loguru import logger
 
 from config import get_config
-from .base_scraper import BaseScraper, ScrapingError
+from .base_scraper import BaseScraper
 
 
 class DailyScraper(BaseScraper):
-    """
-    Scraper kiểm tra trạng thái daily standup.
 
-    Cách hoạt động:
-    1. Truy cập trang daily report nội bộ
-    2. Kiểm tra ai đã submit daily form hôm nay
-    3. Trả về danh sách người chưa điền
-    """
-
-    PARSER_FORMAT = os.getenv("INTERNAL_DAILY_FORMAT", "html_table")
+    # Format tên document: "Daily Meeting 7 - 21-May-2026"
+    DAILY_TITLE_PATTERN = re.compile(
+        r"Daily Meeting\s+\d+\s*[-–]\s*(\d{1,2}-\w{3}-\d{4})",
+        re.IGNORECASE,
+    )
+    # Format ngày trong tên document: 21-May-2026
+    DATE_FORMAT = "%d-%b-%Y"
 
     def __init__(self):
         super().__init__()
-        cfg = get_config()
-        self.daily_url = cfg.internal_site.daily_url
-        self.team_members = [m["name"] for m in cfg.team.get_members()]
+        self.parent_url = self.cfg.daily_parent_url
+        self.base_url = self.cfg.base_url
+        self.team = self.load_team()
+        self.team_names = [m["name"] for m in self.team]
 
-    def fetch_data(self, target_date: Optional[date] = None) -> Dict[str, Any]:
+    def get_missing_users(self, target_date: Optional[date] = None) -> List[Dict]:
         """
-        Lấy dữ liệu daily standup theo ngày.
+        Trả về danh sách thành viên chưa điền daily hôm nay.
+
+        Returns:
+            List[dict]: [{"name": "...", "position": "..."}]
+        """
+        result = self.fetch_daily_data(target_date)
+        return result.get("missing", [])
+
+    def fetch_daily_data(self, target_date: Optional[date] = None) -> Dict[str, Any]:
+        """
+        Lấy dữ liệu daily standup của ngày chỉ định.
 
         Returns:
             {
-                "date": "2024-01-15",
-                "submitted": ["Nguyen Van A", ...],
-                "missing": ["Le Van C"],
-                "entries": [{"user": ..., "yesterday": ..., "today": ..., "blockers": ...}]
+                "date": "2026-05-22",
+                "document_url": "...",
+                "submitted": [{"name": "...", "position": "..."}],
+                "missing": [{"name": "...", "position": "..."}],
+                "entries": [{"name": ..., "yesterday": ..., "today": ..., ...}]
             }
         """
         if target_date is None:
             target_date = date.today()
 
-        if not self.daily_url:
-            logger.warning("[DailyScraper] INTERNAL_DAILY_URL chưa cấu hình, dùng mock data")
+        if not self.parent_url:
+            logger.warning("[Daily] INTERNAL_DAILY_PARENT_URL chưa cấu hình → dùng mock data")
             return self._mock_data(target_date)
 
-        try:
-            if self.PARSER_FORMAT == "json_api":
-                return self._fetch_json_api(target_date)
-            elif self.PARSER_FORMAT == "google_forms":
-                return self._fetch_google_forms(target_date)
-            elif self.PARSER_FORMAT == "confluence":
-                return self._fetch_confluence(target_date)
-            else:
-                return self._fetch_html_table(target_date)
+        # Bước 1: Tìm URL document của ngày hôm nay
+        doc_url = self._find_today_document(target_date)
+        if not doc_url:
+            logger.warning(f"[Daily] Không tìm thấy document ngày {target_date}")
+            return self._not_found_result(target_date)
 
-        except Exception as e:
-            logger.error(f"[DailyScraper] Lỗi fetch data: {e}")
-            return self._mock_data(target_date)
-
-    def get_missing_users(self, target_date: Optional[date] = None) -> List[str]:
-        """Lấy danh sách người chưa điền daily."""
-        data = self.fetch_data(target_date)
-        return data.get("missing", [])
-
-    def get_daily_entries(self, target_date: Optional[date] = None) -> List[Dict]:
-        """Lấy nội dung daily của từng người."""
-        data = self.fetch_data(target_date)
-        return data.get("entries", [])
-
-    # ------------------------------------------------------------------
-    # HTML Table Parser
-    # ------------------------------------------------------------------
-
-    def _fetch_html_table(self, target_date: date) -> Dict[str, Any]:
-        """Parse bảng HTML chứa daily standup."""
-        date_str = target_date.strftime("%Y-%m-%d")
-        url = f"{self.daily_url}?date={date_str}"
-
-        logger.info(f"[DailyScraper] Fetching HTML: {url}")
-        resp = self.get(url)
-
+        # Bước 2: Parse bảng daily
+        logger.info(f"[Daily] Đọc document: {doc_url}")
+        resp = self.get(doc_url)
         if not resp:
-            raise ScrapingError("Không thể truy cập trang daily standup")
+            logger.error(f"[Daily] Không tải được document: {doc_url}")
+            return self._not_found_result(target_date)
+
+        return self._parse_daily_document(resp.text, target_date, doc_url)
+
+    # ------------------------------------------------------------------
+    # Bước 1: Tìm document của hôm nay trong sidebar
+    # ------------------------------------------------------------------
+
+    def _find_today_document(self, target_date: date) -> Optional[str]:
+        """
+        Truy cập trang cha → parse sidebar → tìm link của ngày hôm nay.
+        """
+        logger.info(f"[Daily] Tìm document ngày {target_date} trong: {self.parent_url}")
+        resp = self.get(self.parent_url)
+        if not resp:
+            return None
 
         soup = self.parse_html(resp.text)
+        target_str = target_date.strftime(self.DATE_FORMAT)  # VD: "22-May-2026"
 
-        # Tìm bảng daily (customize theo trang của bạn)
-        table = (
-            soup.find("table", {"class": "daily-table"})
-            or soup.find("table", {"id": "daily-report"})
-            or soup.find("table", {"class": ["standup", "daily", "report"]})
-            or soup.find("table")
+        # Tìm tất cả link trong sidebar/navigation
+        # Sidebar thường có class như "sidebar", "tree", "nav", "document-list"
+        sidebar = (
+            soup.find(["nav", "aside", "div"], {"class": re.compile(r"sidebar|tree|nav|menu|document", re.I)})
+            or soup.find(id=re.compile(r"sidebar|tree|nav|menu", re.I))
+            or soup  # fallback: tìm trong toàn trang
         )
 
+        # Tìm link có text khớp với ngày hôm nay
+        for link in sidebar.find_all("a", href=True):
+            link_text = link.get_text(strip=True)
+
+            # Kiểm tra tên document có khớp pattern không
+            if not re.search(r"Daily Meeting", link_text, re.I):
+                continue
+
+            # Kiểm tra ngày trong tên
+            if target_str.lower() in link_text.lower():
+                href = link["href"]
+                # Tạo URL đầy đủ nếu là relative URL
+                if href.startswith("http"):
+                    return href
+                return urljoin(self.base_url + "/", href.lstrip("/"))
+
+        logger.warning(f"[Daily] Không tìm thấy link chứa '{target_str}' trong sidebar")
+        return None
+
+    # ------------------------------------------------------------------
+    # Bước 2: Parse bảng daily trong document
+    # ------------------------------------------------------------------
+
+    def _parse_daily_document(
+        self, html: str, target_date: date, doc_url: str
+    ) -> Dict[str, Any]:
+        """
+        Parse bảng daily standup.
+
+        Cấu trúc bảng (từ ảnh):
+        Member | Hôm qua tôi làm gì? | Hôm nay tôi sẽ làm gì? | Blockers | Adhoc
+        """
+        soup = self.parse_html(html)
+
+        # Tìm bảng daily (tìm bảng có cột "Member" hoặc "Hôm qua")
+        table = self._find_daily_table(soup)
         if not table:
-            logger.warning("[DailyScraper] Không tìm thấy bảng daily")
-            return self._build_result(target_date, [], self.team_members, [])
+            logger.warning("[Daily] Không tìm thấy bảng daily trong document")
+            return self._not_found_result(target_date)
 
-        submitted, entries = self._parse_daily_table(table)
-        missing = [m for m in self.team_members if m not in submitted]
-
-        return self._build_result(target_date, submitted, missing, entries)
-
-    def _parse_daily_table(self, table) -> tuple:
-        """
-        Parse bảng HTML để lấy thông tin daily.
-
-        Customize theo cấu trúc bảng của trang nội bộ bạn.
-        Giả sử cấu trúc: Name | Yesterday | Today | Blockers | Status
-        """
-        submitted = []
+        col_idx = self._detect_daily_columns(table)
         entries = []
+        submitted = []
+        missing = []
+
         rows = table.find_all("tr")[1:]  # Bỏ header
-
         for row in rows:
-            cols = row.find_all(["td", "th"])
-            if len(cols) < 2:
+            cells = row.find_all(["td", "th"])
+            if not cells:
                 continue
 
-            user_name = cols[0].get_text(strip=True)
-            if not user_name:
+            name = self._get_cell_text(cells, col_idx["member"])
+            if not name:
                 continue
 
-            # Lấy nội dung các cột (customize theo cấu trúc bảng)
-            yesterday = cols[1].get_text(strip=True) if len(cols) > 1 else ""
-            today = cols[2].get_text(strip=True) if len(cols) > 2 else ""
-            blockers = cols[3].get_text(strip=True) if len(cols) > 3 else ""
-            status = cols[4].get_text(strip=True) if len(cols) > 4 else ""
+            yesterday = self._get_cell_text(cells, col_idx["yesterday"])
+            today = self._get_cell_text(cells, col_idx["today"])
+            blockers = self._get_cell_text(cells, col_idx.get("blockers", -1))
 
-            # Xác định đã submit chưa
-            is_submitted = bool(
-                yesterday or today
-            ) and status.lower() not in ("pending", "chờ", "")
+            # Đã điền nếu ít nhất 1 trong 2 cột có nội dung
+            is_submitted = bool(yesterday or today)
 
-            if is_submitted:
-                submitted.append(user_name)
-
-            entries.append({
-                "user": user_name,
+            entry = {
+                "name": name,
                 "yesterday": yesterday,
                 "today": today,
                 "blockers": blockers,
                 "submitted": is_submitted,
-            })
-
-        return submitted, entries
-
-    # ------------------------------------------------------------------
-    # JSON API Parser
-    # ------------------------------------------------------------------
-
-    def _fetch_json_api(self, target_date: date) -> Dict[str, Any]:
-        """Fetch daily từ JSON API."""
-        date_str = target_date.strftime("%Y-%m-%d")
-        url = f"{self.daily_url}/api/daily"
-
-        logger.info(f"[DailyScraper] Fetching JSON API: {url}")
-        resp = self.get(url, params={"date": date_str})
-
-        if not resp:
-            raise ScrapingError("Không thể truy cập API daily")
-
-        data = resp.json()
-        submitted = []
-        entries = []
-
-        reports = data.get("reports", data.get("data", data.get("items", [])))
-        for report in reports:
-            user = (
-                report.get("user", {}).get("name")
-                or report.get("username")
-                or report.get("name", "")
-            )
-            if not user:
-                continue
-
-            entry = {
-                "user": user,
-                "yesterday": report.get("yesterday", report.get("done_yesterday", "")),
-                "today": report.get("today", report.get("plan_today", "")),
-                "blockers": report.get("blockers", report.get("impediments", "")),
-                "submitted": report.get("submitted", True),
             }
             entries.append(entry)
 
-            if entry["submitted"]:
-                submitted.append(user)
+            # Đối chiếu với team.json để lấy position
+            member_info = self._get_member_info(name)
+            person = {"name": name, "position": member_info.get("position", "")}
 
-        missing = [m for m in self.team_members if m not in submitted]
-        return self._build_result(target_date, submitted, missing, entries, raw=data)
+            if is_submitted:
+                submitted.append(person)
+            else:
+                missing.append(person)
 
-    # ------------------------------------------------------------------
-    # Google Forms Parser (dùng Google Sheets API để đọc responses)
-    # ------------------------------------------------------------------
+        logger.info(
+            f"[Daily] {len(submitted)} đã điền, {len(missing)} chưa điền"
+        )
 
-    def _fetch_google_forms(self, target_date: date) -> Dict[str, Any]:
-        """
-        Fetch daily từ Google Forms (qua Google Sheets linked spreadsheet).
-        Cần cấu hình GOOGLE_SHEETS_ID trong .env.
-        """
-        sheets_id = os.getenv("GOOGLE_SHEETS_DAILY_ID", "")
-        if not sheets_id:
-            raise ScrapingError("GOOGLE_SHEETS_DAILY_ID chưa cấu hình")
+        return {
+            "date": target_date.strftime("%Y-%m-%d"),
+            "document_url": doc_url,
+            "submitted": submitted,
+            "missing": missing,
+            "entries": entries,
+        }
 
-        date_str = target_date.strftime("%d/%m/%Y")
-        url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheets_id}/values/A:E"
+    def _find_daily_table(self, soup):
+        """Tìm bảng daily standup trong document."""
+        keywords = re.compile(r"hôm qua|yesterday|hôm nay|today|member|thành viên", re.I)
 
-        resp = self.get(url)
-        if not resp:
-            raise ScrapingError("Không thể đọc Google Sheets")
+        for table in soup.find_all("table"):
+            header_text = ""
+            first_row = table.find("tr")
+            if first_row:
+                header_text = first_row.get_text().lower()
+            if re.search(r"hôm qua|yesterday|hôm nay|today|member", header_text, re.I):
+                return table
 
-        data = resp.json()
-        rows = data.get("values", [])
+        # Fallback: bảng đầu tiên có đủ cột
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            if rows and len(rows[0].find_all(["th", "td"])) >= 3:
+                return table
 
-        submitted = []
-        entries = []
+        return None
 
-        # Giả sử cột: Timestamp | Email | Name | Yesterday | Today | Blockers
-        for row in rows[1:]:  # Bỏ header
-            if len(row) < 3:
-                continue
+    def _detect_daily_columns(self, table) -> Dict[str, int]:
+        """Tự động xác định index các cột quan trọng."""
+        # Default theo cấu trúc bảng trong ảnh:
+        # 0: Member | 1: Hôm qua | 2: Hôm nay | 3: Blockers | 4: Adhoc
+        indices = {"member": 0, "yesterday": 1, "today": 2, "blockers": 3}
 
-            timestamp = row[0] if len(row) > 0 else ""
-            # Kiểm tra ngày submit
-            if date_str not in timestamp:
-                continue
+        header_row = table.find("tr")
+        if not header_row:
+            return indices
 
-            user = row[2] if len(row) > 2 else row[1]
-            entry = {
-                "user": user,
-                "yesterday": row[3] if len(row) > 3 else "",
-                "today": row[4] if len(row) > 4 else "",
-                "blockers": row[5] if len(row) > 5 else "",
-                "submitted": True,
-            }
-            submitted.append(user)
-            entries.append(entry)
+        cols = header_row.find_all(["th", "td"])
+        for i, col in enumerate(cols):
+            text = col.get_text(strip=True).lower()
+            if re.search(r"member|thành viên|tên", text):
+                indices["member"] = i
+            elif re.search(r"hôm qua|yesterday|done|làm gì.*qua", text):
+                indices["yesterday"] = i
+            elif re.search(r"hôm nay|today|plan|sẽ làm", text):
+                indices["today"] = i
+            elif re.search(r"block|cản trở|impediment", text):
+                indices["blockers"] = i
 
-        missing = [m for m in self.team_members if m not in submitted]
-        return self._build_result(target_date, submitted, missing, entries)
+        return indices
 
-    # ------------------------------------------------------------------
-    # Confluence Parser
-    # ------------------------------------------------------------------
+    def _get_cell_text(self, cells: list, idx: int) -> str:
+        if idx < 0 or idx >= len(cells):
+            return ""
+        return cells[idx].get_text(separator=" ", strip=True)
 
-    def _fetch_confluence(self, target_date: date) -> Dict[str, Any]:
-        """Fetch daily từ Confluence page."""
-        date_str = target_date.strftime("%d/%m/%Y")
-        logger.info(f"[DailyScraper] Fetching Confluence: {self.daily_url}")
-
-        resp = self.get(self.daily_url)
-        if not resp:
-            raise ScrapingError("Không thể truy cập Confluence")
-
-        soup = self.parse_html(resp.text)
-        submitted = []
-        entries = []
-
-        # Tìm section của ngày hôm nay
-        date_headers = soup.find_all(["h2", "h3", "h4"], text=lambda t: t and date_str in t)
-
-        if date_headers:
-            header = date_headers[0]
-            sibling = header.find_next_sibling()
-
-            while sibling and sibling.name not in ["h2", "h3"]:
-                # Tìm tên thành viên trong section
-                for item in sibling.find_all(["li", "p", "td"]):
-                    text = item.get_text(strip=True)
-                    for member in self.team_members:
-                        if member.lower() in text.lower() and member not in submitted:
-                            submitted.append(member)
-                            entries.append({
-                                "user": member,
-                                "yesterday": "",
-                                "today": text,
-                                "blockers": "",
-                                "submitted": True,
-                            })
-                sibling = sibling.find_next_sibling()
-
-        missing = [m for m in self.team_members if m not in submitted]
-        return self._build_result(target_date, submitted, missing, entries)
+    def _get_member_info(self, name: str) -> Dict:
+        """Tìm thông tin thành viên trong team.json theo tên."""
+        for m in self.team:
+            if m["name"].lower() == name.lower():
+                return m
+            # Fuzzy match: so sánh họ tên tắt
+            if name.lower() in m["name"].lower() or m["name"].lower() in name.lower():
+                return m
+        return {"name": name, "position": ""}
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _build_result(
-        target_date: date,
-        submitted: List[str],
-        missing: List[str],
-        entries: List[Dict],
-        raw: Optional[Dict] = None,
-    ) -> Dict[str, Any]:
+    def _not_found_result(self, target_date: date) -> Dict[str, Any]:
+        """Kết quả khi không tìm thấy document."""
         return {
             "date": target_date.strftime("%Y-%m-%d"),
-            "submitted": submitted,
-            "missing": missing,
-            "submitted_count": len(submitted),
-            "missing_count": len(missing),
-            "entries": entries,
-            "raw_data": raw or {},
+            "document_url": None,
+            "submitted": [],
+            "missing": [
+                {"name": m["name"], "position": m.get("position", "")}
+                for m in self.team
+            ],
+            "entries": [],
+            "error": "Không tìm thấy document daily hôm nay",
         }
 
     def _mock_data(self, target_date: date) -> Dict[str, Any]:
         """Mock data khi URL chưa cấu hình."""
-        members = self.team_members or ["Nguyen Van A", "Tran Thi B", "Le Van C", "Pham Thi D"]
-        submitted = members[:max(1, int(len(members) * 0.75))]
-        missing = [m for m in members if m not in submitted]
-        entries = [
-            {
-                "user": m,
-                "yesterday": "Làm feature X",
-                "today": "Tiếp tục feature X, review code",
-                "blockers": "",
-                "submitted": True,
-            }
-            for m in submitted
-        ]
+        logger.info("[Daily] Dùng MOCK data")
+        submitted = []
+        missing = []
+        entries = []
 
-        logger.info(f"[DailyScraper] Dùng MOCK data cho {target_date}")
-        return self._build_result(target_date, submitted, missing, entries)
+        for i, m in enumerate(self.team):
+            person = {"name": m["name"], "position": m.get("position", "")}
+            if i % 4 != 3:  # 75% đã điền
+                submitted.append(person)
+                entries.append({
+                    "name": m["name"],
+                    "yesterday": "Làm task ABC, review code",
+                    "today": "Tiếp tục task ABC, họp daily",
+                    "blockers": "",
+                    "submitted": True,
+                })
+            else:
+                missing.append(person)
+                entries.append({
+                    "name": m["name"],
+                    "yesterday": "",
+                    "today": "",
+                    "blockers": "",
+                    "submitted": False,
+                })
+
+        return {
+            "date": target_date.strftime("%Y-%m-%d"),
+            "document_url": None,
+            "submitted": submitted,
+            "missing": missing,
+            "entries": entries,
+        }

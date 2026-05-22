@@ -1,18 +1,19 @@
 """
-Scraper cho trang web log work nội bộ.
+Logwork Scraper - Kiểm tra ai chưa log đủ giờ.
 
-Hỗ trợ nhiều format trang web:
-1. HTML table (Jira-like, Redmine, custom)
-2. JSON API endpoint
-3. Confluence page
-4. Google Sheets (qua API)
+Trang: https://10.36.36.63:8618/op_pm/Worklog?fav=...
+URL đã có filter "Yesterday" sẵn → truy cập là có dữ liệu hôm qua.
 
-Cấu hình INTERNAL_LOGWORK_URL và INTERNAL_LOGWORK_FORMAT để chọn parser phù hợp.
+Bảng hiển thị: Task | User | Date | Activity | Time spent | Work notes
+
+Logic:
+- Parse toàn bộ bảng
+- Group by User → cộng tổng Time spent
+- Ai tổng < 7.5h hoặc không xuất hiện = chưa đủ log work
 """
-import os
-import json
-from datetime import date, datetime, timedelta
-from typing import Dict, Any, List, Optional
+import re
+from datetime import date, timedelta
+from typing import Dict, List, Optional, Any
 
 from loguru import logger
 
@@ -21,272 +22,216 @@ from .base_scraper import BaseScraper, ScrapingError
 
 
 class LogworkScraper(BaseScraper):
-    """
-    Scraper kiểm tra trạng thái log work của các thành viên.
-
-    Cách hoạt động:
-    1. Đăng nhập vào trang nội bộ (theo cấu hình auth)
-    2. Truy cập trang báo cáo log work
-    3. Parse danh sách ai đã/chưa log work
-    4. Trả về danh sách người chưa log work
-    """
-
-    # Format parser: "html_table" | "json_api" | "confluence" | "jira"
-    PARSER_FORMAT = os.getenv("INTERNAL_LOGWORK_FORMAT", "html_table")
 
     def __init__(self):
         super().__init__()
-        cfg = get_config()
-        self.logwork_url = cfg.internal_site.logwork_url
-        self.team_members = [m["name"] for m in cfg.team.get_members()]
+        self.worklog_url = self.cfg.worklog_url
+        self.min_hours = self.cfg.logwork_min_hours
+        self.team = self.load_team()
+        self.team_names = [m["name"] for m in self.team]
 
-    def fetch_data(self, target_date: Optional[date] = None) -> Dict[str, Any]:
+    def get_missing_users(self, target_date: Optional[date] = None) -> List[str]:
         """
-        Lấy dữ liệu log work theo ngày.
+        Trả về danh sách thành viên chưa log đủ giờ.
 
-        Args:
-            target_date: Ngày cần kiểm tra (mặc định: hôm qua)
+        Returns:
+            List[dict]: [{"name": "...", "position": "...", "logged_hours": 0.0}]
+        """
+        result = self.fetch_logwork_data()
+        return result.get("missing", [])
+
+    def fetch_logwork_data(self) -> Dict[str, Any]:
+        """
+        Lấy toàn bộ dữ liệu logwork từ trang.
 
         Returns:
             {
-                "date": "2024-01-15",
-                "logged": ["Nguyen Van A", "Tran Thi B"],
-                "missing": ["Le Van C"],
-                "raw_data": {...}
+                "logged": [{"name": "...", "position": "...", "hours": 8.0}],
+                "missing": [{"name": "...", "position": "...", "hours": 0.0}],
+                "summary": {"total_hours": 30.0, "logged_count": 5, "missing_count": 1}
             }
         """
-        if target_date is None:
-            # Mặc định kiểm tra hôm qua (vì check lúc 9:30 sáng)
-            target_date = date.today() - timedelta(days=1)
-            # Bỏ qua cuối tuần
-            if target_date.weekday() >= 5:  # Thứ 7 hoặc CN
-                target_date = target_date - timedelta(days=target_date.weekday() - 4)
+        if not self.worklog_url:
+            logger.warning("[Logwork] INTERNAL_WORKLOG_URL chưa cấu hình → dùng mock data")
+            return self._mock_data()
 
-        if not self.logwork_url:
-            logger.warning("[LogworkScraper] INTERNAL_LOGWORK_URL chưa cấu hình, dùng mock data")
-            return self._mock_data(target_date)
-
-        try:
-            if self.PARSER_FORMAT == "json_api":
-                return self._fetch_json_api(target_date)
-            elif self.PARSER_FORMAT == "jira":
-                return self._fetch_jira(target_date)
-            elif self.PARSER_FORMAT == "confluence":
-                return self._fetch_confluence(target_date)
-            else:
-                return self._fetch_html_table(target_date)
-
-        except Exception as e:
-            logger.error(f"[LogworkScraper] Lỗi fetch data: {e}")
-            return self._mock_data(target_date)
-
-    def get_missing_users(self, target_date: Optional[date] = None) -> List[str]:
-        """Lấy danh sách người chưa log work."""
-        data = self.fetch_data(target_date)
-        return data.get("missing", [])
-
-    # ------------------------------------------------------------------
-    # HTML Table Parser (trang HTML thông thường)
-    # ------------------------------------------------------------------
-
-    def _fetch_html_table(self, target_date: date) -> Dict[str, Any]:
-        """Parse bảng HTML chứa thông tin log work."""
-        date_str = target_date.strftime("%Y-%m-%d")
-        url = f"{self.logwork_url}?date={date_str}"
-
-        logger.info(f"[LogworkScraper] Fetching HTML: {url}")
-        resp = self.get(url)
+        logger.info(f"[Logwork] Fetching: {self.worklog_url}")
+        resp = self.get(self.worklog_url)
 
         if not resp:
-            raise ScrapingError("Không thể truy cập trang log work")
+            logger.error("[Logwork] Không thể tải trang worklog")
+            return self._mock_data()
 
-        soup = self.parse_html(resp.text)
+        return self._parse_page(resp.text)
 
-        # Tìm bảng log work (customize selector theo trang của bạn)
-        # Ví dụ: <table class="logwork-table"> hoặc <table id="timesheet">
-        table = (
-            soup.find("table", {"class": "logwork-table"})
-            or soup.find("table", {"id": "timesheet"})
-            or soup.find("table", {"class": ["table", "worklog", "timesheet"]})
-            or soup.find("table")  # fallback: lấy bảng đầu tiên
-        )
+    def _parse_page(self, html: str) -> Dict[str, Any]:
+        """Parse HTML bảng Time Spent."""
+        soup = self.parse_html(html)
+
+        # Tìm bảng chứa dữ liệu worklog
+        # Trang op_pm có cột: Task | User | Date | Activity | Time spent | Work notes
+        table = self._find_worklog_table(soup)
 
         if not table:
-            logger.warning("[LogworkScraper] Không tìm thấy bảng dữ liệu")
-            return self._build_result(target_date, [], self.team_members)
+            logger.warning("[Logwork] Không tìm thấy bảng dữ liệu")
+            return self._build_result({})
 
-        logged_users = self._parse_logwork_table(table, date_str)
-        missing = [m for m in self.team_members if m not in logged_users]
+        # Parse từng dòng → tích lũy giờ theo user
+        user_hours: Dict[str, float] = {}
 
-        return self._build_result(target_date, logged_users, missing)
+        rows = table.find_all("tr")
+        header_row = rows[0] if rows else None
+        col_index = self._detect_column_index(header_row)
 
-    def _parse_logwork_table(self, table, date_str: str) -> List[str]:
-        """
-        Parse bảng HTML để lấy danh sách người đã log work.
-
-        Customize logic này theo cấu trúc bảng của trang nội bộ bạn.
-        """
-        logged = []
-        rows = table.find_all("tr")[1:]  # Bỏ header row
-
-        for row in rows:
-            cols = row.find_all(["td", "th"])
-            if len(cols) < 2:
+        for row in rows[1:]:
+            cells = row.find_all(["td", "th"])
+            if len(cells) < 2:
                 continue
 
-            user_name = cols[0].get_text(strip=True)
-            hours_logged = cols[1].get_text(strip=True)
+            user = self._extract_user(cells, col_index.get("user", 1))
+            hours = self._extract_hours(cells, col_index.get("time_spent", 4))
 
-            # Kiểm tra nếu có log work (giờ > 0)
+            if user:
+                user_hours[user] = user_hours.get(user, 0.0) + hours
+
+        logger.info(f"[Logwork] Parsed {len(user_hours)} users: {user_hours}")
+        return self._build_result(user_hours)
+
+    def _find_worklog_table(self, soup):
+        """Tìm bảng worklog trong HTML."""
+        # Thử theo class/id phổ biến
+        for selector in [
+            {"class": re.compile(r"worklog|time.?spent|timesheet", re.I)},
+            {"id": re.compile(r"worklog|timespent|timesheet", re.I)},
+        ]:
+            table = soup.find("table", selector)
+            if table:
+                return table
+
+        # Fallback: tìm bảng có header chứa "User" và "Time"
+        for table in soup.find_all("table"):
+            header_text = table.get_text().lower()
+            if "user" in header_text and ("time" in header_text or "spent" in header_text):
+                return table
+
+        # Cuối cùng: lấy bảng đầu tiên có đủ cột
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            if rows and len(rows[0].find_all(["th", "td"])) >= 4:
+                return table
+
+        return None
+
+    def _detect_column_index(self, header_row) -> Dict[str, int]:
+        """Tự động xác định index của cột User và Time Spent."""
+        indices = {"user": 1, "time_spent": 4}  # default theo ảnh chụp
+
+        if not header_row:
+            return indices
+
+        cols = header_row.find_all(["th", "td"])
+        for i, col in enumerate(cols):
+            text = col.get_text(strip=True).lower()
+            if text in ("user", "người dùng", "member", "nhân viên"):
+                indices["user"] = i
+            elif "time" in text or "spent" in text or "giờ" in text or "hours" in text:
+                indices["time_spent"] = i
+
+        return indices
+
+    def _extract_user(self, cells, user_col_idx: int) -> Optional[str]:
+        """Lấy tên user từ cell."""
+        if user_col_idx >= len(cells):
+            return None
+        cell = cells[user_col_idx]
+
+        # Thử lấy từ title attribute, alt text, hoặc text thuần
+        user = (
+            cell.get("title")
+            or cell.find("img", {"alt": True}) and cell.find("img")["alt"]
+            or cell.get_text(strip=True)
+        )
+        return user.strip() if user else None
+
+    def _extract_hours(self, cells, time_col_idx: int) -> float:
+        """
+        Parse số giờ từ cell.
+        Hỗ trợ: "7.5h", "7,5h", "7.5", "7h30m", "450m"
+        """
+        if time_col_idx >= len(cells):
+            return 0.0
+
+        text = cells[time_col_idx].get_text(strip=True).lower()
+        if not text or text in ("-", "n/a", "0"):
+            return 0.0
+
+        # Dạng "7h30m" hoặc "7h 30m"
+        hm_match = re.search(r"(\d+)\s*h\s*(\d+)\s*m", text)
+        if hm_match:
+            return int(hm_match.group(1)) + int(hm_match.group(2)) / 60
+
+        # Dạng "450m" (phút)
+        m_match = re.match(r"^(\d+)\s*m$", text)
+        if m_match:
+            return int(m_match.group(1)) / 60
+
+        # Dạng "7.5h" hoặc "7,5h" hoặc "7.5"
+        num_match = re.search(r"[\d.,]+", text)
+        if num_match:
+            num_str = num_match.group(0).replace(",", ".")
             try:
-                hours = float(hours_logged.replace("h", "").replace(",", ".").strip() or "0")
-                if hours > 0:
-                    logged.append(user_name)
+                return float(num_str)
             except ValueError:
-                # Một số trang dùng checkbox hoặc ký hiệu khác
-                if hours_logged and hours_logged.lower() not in ("0", "", "-", "n/a"):
-                    logged.append(user_name)
+                pass
 
-        return logged
+        return 0.0
 
-    # ------------------------------------------------------------------
-    # JSON API Parser
-    # ------------------------------------------------------------------
+    def _build_result(self, user_hours: Dict[str, float]) -> Dict[str, Any]:
+        """
+        Đối chiếu với team.json, phân loại logged / missing.
+        """
+        logged = []
+        missing = []
 
-    def _fetch_json_api(self, target_date: date) -> Dict[str, Any]:
-        """Fetch từ JSON API endpoint."""
-        date_str = target_date.strftime("%Y-%m-%d")
-        url = f"{self.logwork_url}/api/worklogs"
+        for member in self.team:
+            name = member["name"]
+            position = member.get("position", "")
+            hours = user_hours.get(name, 0.0)
 
-        logger.info(f"[LogworkScraper] Fetching JSON API: {url}")
-        resp = self.get(url, params={"date": date_str, "format": "json"})
+            entry = {"name": name, "position": position, "hours": hours}
 
-        if not resp:
-            raise ScrapingError("Không thể truy cập API log work")
+            if hours >= self.min_hours:
+                logged.append(entry)
+            else:
+                missing.append(entry)
 
-        try:
-            data = resp.json()
-        except Exception:
-            raise ScrapingError("Response không phải JSON hợp lệ")
+        # Người log work nhưng không trong team.json
+        for user, hours in user_hours.items():
+            if user not in self.team_names:
+                logger.debug(f"[Logwork] User ngoài team: {user} ({hours}h)")
 
-        # Parse theo cấu trúc JSON của trang bạn
-        # Customize đây theo API response của hệ thống nội bộ
-        logged_users = []
-        worklogs = data.get("worklogs", data.get("data", data.get("items", [])))
+        total_hours = sum(user_hours.values())
+        logger.info(
+            f"[Logwork] Kết quả: {len(logged)} đủ giờ, {len(missing)} thiếu "
+            f"(ngưỡng: {self.min_hours}h)"
+        )
 
-        for entry in worklogs:
-            user = (
-                entry.get("user", {}).get("displayName")
-                or entry.get("username")
-                or entry.get("name")
-                or entry.get("author", {}).get("displayName", "")
-            )
-            hours = float(entry.get("timeSpentSeconds", entry.get("hours", 0)) or 0)
-            if hours > 0 and user:
-                logged_users.append(user)
-
-        missing = [m for m in self.team_members if m not in logged_users]
-        return self._build_result(target_date, logged_users, missing, raw=data)
-
-    # ------------------------------------------------------------------
-    # Jira Worklog Parser
-    # ------------------------------------------------------------------
-
-    def _fetch_jira(self, target_date: date) -> Dict[str, Any]:
-        """Fetch từ Jira REST API (nếu công ty dùng Jira)."""
-        date_str = target_date.strftime("%Y-%m-%d")
-
-        # Jira JQL query: worklogs có ngày target_date
-        jql = f'worklogDate = "{date_str}" AND project in (currentUserProjects())'
-        url = f"{self.logwork_url}/rest/api/2/search"
-
-        logger.info(f"[LogworkScraper] Fetching Jira: {url}")
-        resp = self.get(url, params={
-            "jql": jql,
-            "fields": "worklog,assignee",
-            "expand": "changelog",
-            "maxResults": 200,
-        })
-
-        if not resp:
-            raise ScrapingError("Không thể truy cập Jira API")
-
-        data = resp.json()
-        logged_users = set()
-
-        for issue in data.get("issues", []):
-            worklogs = issue.get("fields", {}).get("worklog", {}).get("worklogs", [])
-            for wl in worklogs:
-                started = wl.get("started", "")[:10]
-                if started == date_str:
-                    author = wl.get("author", {}).get("displayName", "")
-                    if author:
-                        logged_users.add(author)
-
-        missing = [m for m in self.team_members if m not in logged_users]
-        return self._build_result(target_date, list(logged_users), missing, raw=data)
-
-    # ------------------------------------------------------------------
-    # Confluence Parser
-    # ------------------------------------------------------------------
-
-    def _fetch_confluence(self, target_date: date) -> Dict[str, Any]:
-        """Fetch từ Confluence page (nếu log work trên Confluence)."""
-        date_str = target_date.strftime("%d/%m/%Y")
-        logger.info(f"[LogworkScraper] Fetching Confluence: {self.logwork_url}")
-
-        resp = self.get(self.logwork_url)
-        if not resp:
-            raise ScrapingError("Không thể truy cập trang Confluence")
-
-        soup = self.parse_html(resp.text)
-
-        # Tìm section của ngày cần kiểm tra
-        logged_users = []
-        day_section = soup.find(text=lambda t: t and date_str in t)
-
-        if day_section:
-            parent = day_section.find_parent()
-            if parent:
-                # Tìm các tên trong section này
-                for li in parent.find_all_next(["li", "td"], limit=50):
-                    text = li.get_text(strip=True)
-                    for member in self.team_members:
-                        if member.lower() in text.lower():
-                            logged_users.append(member)
-
-        missing = [m for m in self.team_members if m not in logged_users]
-        return self._build_result(target_date, logged_users, missing)
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _build_result(
-        target_date: date,
-        logged: List[str],
-        missing: List[str],
-        raw: Optional[Dict] = None,
-    ) -> Dict[str, Any]:
         return {
-            "date": target_date.strftime("%Y-%m-%d"),
             "logged": logged,
             "missing": missing,
-            "logged_count": len(logged),
-            "missing_count": len(missing),
-            "raw_data": raw or {},
+            "summary": {
+                "total_hours": round(total_hours, 1),
+                "logged_count": len(logged),
+                "missing_count": len(missing),
+                "min_hours": self.min_hours,
+            },
         }
 
-    def _mock_data(self, target_date: date) -> Dict[str, Any]:
-        """
-        Mock data khi URL chưa cấu hình.
-        Dùng để test bot mà không cần trang nội bộ thực sự.
-        """
-        members = self.team_members or ["Nguyen Van A", "Tran Thi B", "Le Van C", "Pham Thi D"]
-        # Giả lập: 70% người đã log work
-        logged = members[:max(1, int(len(members) * 0.7))]
-        missing = [m for m in members if m not in logged]
-
-        logger.info(f"[LogworkScraper] Dùng MOCK data cho {target_date}")
-        return self._build_result(target_date, logged, missing)
+    def _mock_data(self) -> Dict[str, Any]:
+        """Mock data khi URL chưa cấu hình - dùng để test."""
+        logger.info("[Logwork] Dùng MOCK data")
+        user_hours = {}
+        for i, m in enumerate(self.team):
+            # 70% đủ giờ, 30% thiếu
+            user_hours[m["name"]] = 8.0 if i % 3 != 2 else 3.0
+        return self._build_result(user_hours)

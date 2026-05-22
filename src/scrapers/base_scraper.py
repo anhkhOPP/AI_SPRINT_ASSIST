@@ -1,210 +1,217 @@
 """
-Base scraper cho các trang web nội bộ.
+Base Scraper với tự động đăng nhập form HTML.
 
-Hỗ trợ nhiều phương thức xác thực:
-- session_cookie: Dùng cookie session từ browser
-- basic_auth: HTTP Basic Authentication
-- oauth2: Bearer token
-- ldap: LDAP (qua Basic Auth)
-- form_login: Đăng nhập form HTML (tự động)
-
-QUAN TRỌNG: Trang web nội bộ KHÔNG public ra ngoài.
-Scraper chỉ chạy trong mạng nội bộ / VPN.
+Luồng xác thực:
+1. POST username/password vào login endpoint
+2. Server trả về session cookie → lưu vào session
+3. Dùng session đó cho các request tiếp theo
+4. Khi nhận 401 hoặc bị redirect về trang login → tự đăng nhập lại
+5. Retry request gốc sau khi đăng nhập lại thành công
 """
+import re
 import time
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List
 from datetime import date
 
 import requests
+import urllib3
 from bs4 import BeautifulSoup
 from loguru import logger
 
 from config import get_config
 
+# Tắt warning SSL cho cert tự ký (internal server)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-class AuthenticationError(Exception):
-    """Lỗi xác thực vào trang nội bộ."""
+
+class LoginError(Exception):
+    pass
 
 
 class ScrapingError(Exception):
-    """Lỗi khi scrape dữ liệu."""
+    pass
 
 
 class BaseScraper(ABC):
-    """
-    Lớp cơ sở cho tất cả scrapers.
-    Xử lý authentication và HTTP session.
-    """
 
     def __init__(self):
         cfg = get_config()
-        self.site_cfg = cfg.internal_site
+        self.cfg = cfg.internal
         self.session = requests.Session()
-        self._authenticated = False
-        self._setup_session()
-
-    def _setup_session(self):
-        """Thiết lập session theo phương thức auth được cấu hình."""
+        self.session.verify = False  # Bỏ qua SSL tự ký
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (AI Sprint Assistant Bot)",
-            "Accept": "text/html,application/xhtml+xml,application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/json,*/*",
             "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8",
         })
+        self._logged_in = False
 
-        auth_type = self.site_cfg.auth_type.lower()
+    # ------------------------------------------------------------------
+    # Login tự động
+    # ------------------------------------------------------------------
 
-        if auth_type == "session_cookie":
-            self._setup_cookie_auth()
-        elif auth_type in ("basic_auth", "ldap"):
-            self._setup_basic_auth()
-        elif auth_type == "oauth2":
-            self._setup_oauth2()
-        elif auth_type == "form_login":
-            # Form login sẽ được xử lý khi gọi lần đầu
-            pass
-        else:
-            logger.warning(f"Phương thức auth không xác định: {auth_type}")
+    def ensure_logged_in(self) -> bool:
+        """Đảm bảo đã đăng nhập trước khi gửi request."""
+        if not self._logged_in:
+            return self.login()
+        return True
 
-    def _setup_cookie_auth(self):
-        """Thiết lập xác thực qua session cookie."""
-        cookie_value = self.site_cfg.session_cookie
-        cookie_name = self.site_cfg.cookie_name
-
-        if not cookie_value:
-            logger.warning("Session cookie chưa được cấu hình (INTERNAL_SESSION_COOKIE)")
-            return
-
-        self.session.cookies.set(
-            cookie_name,
-            cookie_value,
-            domain=self._extract_domain(self.site_cfg.logwork_url),
-        )
-        self._authenticated = True
-        logger.info(f"[Auth] Đã thiết lập cookie auth: {cookie_name}=***")
-
-    def _setup_basic_auth(self):
-        """Thiết lập HTTP Basic Authentication."""
-        username = self.site_cfg.username
-        password = self.site_cfg.password
-
-        if not username or not password:
-            logger.warning("Username/Password chưa được cấu hình")
-            return
-
-        self.session.auth = (username, password)
-        self._authenticated = True
-        logger.info(f"[Auth] Đã thiết lập basic auth cho user: {username}")
-
-    def _setup_oauth2(self):
-        """Thiết lập OAuth2 Bearer token."""
-        token = self.site_cfg.oauth_token
-
-        if not token:
-            logger.warning("OAuth token chưa được cấu hình (INTERNAL_OAUTH_TOKEN)")
-            return
-
-        self.session.headers["Authorization"] = f"Bearer {token}"
-        self._authenticated = True
-        logger.info("[Auth] Đã thiết lập OAuth2 Bearer token")
-
-    def do_form_login(self, login_url: str, username_field: str = "username", password_field: str = "password") -> bool:
+    def login(self) -> bool:
         """
-        Đăng nhập qua form HTML.
-        Tự động tìm và submit form đăng nhập.
-        """
-        username = self.site_cfg.username
-        password = self.site_cfg.password
+        Đăng nhập vào op_pm bằng form HTML.
 
-        if not username or not password:
-            logger.error("[Auth] Chưa cấu hình username/password cho form login")
-            return False
+        Tự động:
+        1. GET trang login để lấy CSRF token nếu có
+        2. POST username + password
+        3. Kiểm tra kết quả đăng nhập
+        """
+        login_url = self.cfg.get_login_url()
+        logger.info(f"[Auth] Đang đăng nhập: {login_url}")
 
         try:
-            # Lấy trang đăng nhập để lấy CSRF token
-            resp = self.session.get(login_url, timeout=10)
-            soup = BeautifulSoup(resp.text, "lxml")
+            # Bước 1: GET trang login, lấy CSRF token
+            resp = self.session.get(login_url, timeout=15, allow_redirects=True)
+            csrf_token = self._extract_csrf(resp.text)
 
-            # Tìm CSRF token (nếu có)
-            csrf_token = None
-            csrf_input = soup.find("input", {"name": ["csrf_token", "_token", "authenticity_token"]})
-            if csrf_input:
-                csrf_token = csrf_input.get("value", "")
-
-            # Submit form
+            # Bước 2: POST thông tin đăng nhập
             form_data = {
-                username_field: username,
-                password_field: password,
+                self.cfg.login_field_username: self.cfg.username,
+                self.cfg.login_field_password: self.cfg.password,
             }
             if csrf_token:
-                form_data["csrf_token"] = csrf_token
+                # Thử các tên CSRF field phổ biến
+                for csrf_field in ["csrf_token", "_token", "csrfmiddlewaretoken", "__RequestVerificationToken"]:
+                    form_data[csrf_field] = csrf_token
 
-            login_resp = self.session.post(login_url, data=form_data, timeout=10)
+            login_resp = self.session.post(
+                login_url,
+                data=form_data,
+                timeout=15,
+                allow_redirects=True,
+            )
 
-            # Kiểm tra đăng nhập thành công (dựa vào redirect hoặc nội dung)
-            if login_resp.status_code in (200, 302):
-                self._authenticated = True
-                logger.info(f"[Auth] Form login thành công cho {username}")
+            # Bước 3: Kiểm tra đăng nhập thành công
+            if self._is_login_successful(login_resp):
+                self._logged_in = True
+                logger.info(f"[Auth] ✅ Đăng nhập thành công: {self.cfg.username}")
                 return True
 
-            logger.error(f"[Auth] Form login thất bại: {login_resp.status_code}")
+            logger.error(f"[Auth] ❌ Đăng nhập thất bại (status={login_resp.status_code})")
+            logger.debug(f"[Auth] Response URL sau login: {login_resp.url}")
             return False
 
         except requests.RequestException as e:
-            logger.error(f"[Auth] Lỗi form login: {e}")
+            logger.error(f"[Auth] Lỗi kết nối khi đăng nhập: {e}")
             return False
 
-    def get(self, url: str, params: Optional[Dict] = None, retry: int = 3) -> Optional[requests.Response]:
-        """GET request với retry logic."""
-        for attempt in range(retry):
+    def _is_login_successful(self, resp: requests.Response) -> bool:
+        """
+        Xác định đăng nhập thành công hay không.
+        Logic: Nếu sau POST không bị redirect về trang login = thành công.
+        """
+        final_url = resp.url.lower()
+        login_indicators = ["/login", "/signin", "/auth", "login="]
+
+        # Nếu URL cuối cùng vẫn là trang login → thất bại
+        for indicator in login_indicators:
+            if indicator in final_url:
+                return False
+
+        # Kiểm tra response có chứa form login không
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "lxml")
+            login_form = soup.find("form", {"action": re.compile(r"login|signin|auth", re.I)})
+            if login_form:
+                return False
+
+        return resp.status_code in (200, 302)
+
+    def _extract_csrf(self, html: str) -> Optional[str]:
+        """Tìm CSRF token trong HTML."""
+        soup = BeautifulSoup(html, "lxml")
+        for name in ["csrf_token", "_token", "csrfmiddlewaretoken", "__RequestVerificationToken"]:
+            inp = soup.find("input", {"name": name})
+            if inp:
+                return inp.get("value", "")
+        # Tìm trong meta tag
+        meta = soup.find("meta", {"name": re.compile(r"csrf", re.I)})
+        if meta:
+            return meta.get("content", "")
+        return None
+
+    # ------------------------------------------------------------------
+    # HTTP requests với auto re-login
+    # ------------------------------------------------------------------
+
+    def get(self, url: str, params: Optional[Dict] = None, retry: int = 2) -> Optional[requests.Response]:
+        """GET request với tự động re-login khi session hết hạn."""
+        self.ensure_logged_in()
+
+        for attempt in range(retry + 1):
             try:
-                resp = self.session.get(url, params=params, timeout=15)
+                resp = self.session.get(url, params=params, timeout=20, allow_redirects=True)
 
-                if resp.status_code == 401:
-                    raise AuthenticationError(f"Xác thực thất bại (401) khi truy cập: {url}")
-                if resp.status_code == 403:
-                    raise AuthenticationError(f"Không có quyền truy cập (403): {url}")
-                if resp.status_code == 404:
-                    raise ScrapingError(f"Không tìm thấy trang (404): {url}")
-                if resp.status_code >= 500:
-                    raise ScrapingError(f"Lỗi server ({resp.status_code}): {url}")
+                # Bị redirect về trang login → session hết hạn
+                if self._is_redirected_to_login(resp):
+                    if attempt < retry:
+                        logger.info("[Auth] Session hết hạn, đang đăng nhập lại...")
+                        self._logged_in = False
+                        if self.login():
+                            continue
+                    logger.error("[Auth] Không thể đăng nhập lại")
+                    return None
 
-                resp.raise_for_status()
-                return resp
+                if resp.status_code == 200:
+                    return resp
 
-            except AuthenticationError:
-                raise
-            except (requests.RequestException, ScrapingError) as e:
-                if attempt < retry - 1:
+                logger.warning(f"[Scraper] HTTP {resp.status_code}: {url}")
+                return None
+
+            except requests.RequestException as e:
+                if attempt < retry:
                     wait = 2 ** attempt
                     logger.warning(f"[Scraper] Retry {attempt + 1}/{retry} sau {wait}s: {e}")
                     time.sleep(wait)
                 else:
-                    logger.error(f"[Scraper] Thất bại sau {retry} lần thử: {e}")
+                    logger.error(f"[Scraper] Thất bại sau {retry + 1} lần: {e}")
                     return None
 
         return None
 
+    def _is_redirected_to_login(self, resp: requests.Response) -> bool:
+        """Kiểm tra có bị redirect về trang login không."""
+        url = resp.url.lower()
+        return any(x in url for x in ["/login", "/signin", "/auth/login"])
+
     def parse_html(self, html: str) -> BeautifulSoup:
-        """Parse HTML với lxml parser."""
         return BeautifulSoup(html, "lxml")
 
-    @staticmethod
-    def _extract_domain(url: str) -> str:
-        """Trích xuất domain từ URL."""
-        if not url:
-            return ""
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            return parsed.netloc
-        except Exception:
-            return ""
+    # ------------------------------------------------------------------
+    # Load team members
+    # ------------------------------------------------------------------
 
-    @abstractmethod
-    def fetch_data(self, target_date: Optional[date] = None) -> Dict[str, Any]:
-        """Lấy dữ liệu từ trang web. Subclass phải implement."""
+    @staticmethod
+    def load_team() -> List[Dict[str, Any]]:
+        """Đọc danh sách thành viên từ team.json."""
+        import json
+        from pathlib import Path
+
+        team_file = Path("team.json")
+        if not team_file.exists():
+            logger.warning("[Scraper] Không tìm thấy team.json")
+            return []
+        try:
+            with open(team_file, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"[Scraper] Lỗi đọc team.json: {e}")
+            return []
+
+    # ------------------------------------------------------------------
+    # Abstract methods
+    # ------------------------------------------------------------------
 
     @abstractmethod
     def get_missing_users(self, target_date: Optional[date] = None) -> List[str]:
-        """Lấy danh sách người chưa thực hiện. Subclass phải implement."""
+        pass

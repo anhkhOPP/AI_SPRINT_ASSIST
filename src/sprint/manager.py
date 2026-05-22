@@ -205,7 +205,7 @@ class SprintManager:
         # Tính ngày sprint mới
         old_end = datetime.strptime(old_sprint.end_date, "%Y-%m-%d").date()
         new_start = old_end + timedelta(days=1)
-        new_end = new_start + timedelta(weeks=self.cfg.sprint.sprint_duration_weeks) - timedelta(days=1)
+        new_end = new_start + timedelta(weeks=self.cfg.sprint.duration_weeks) - timedelta(days=1)
 
         new_sprint = Sprint(
             name=new_name,
@@ -325,13 +325,13 @@ class SprintManager:
 
         # Khởi tạo từ config
         cfg = self.cfg.sprint
-        end_date = cfg.get_sprint_end().strftime("%Y-%m-%d")
+        end_date = cfg.end_date().strftime("%Y-%m-%d")
         self._current_sprint = Sprint(
-            name=cfg.current_sprint_name,
-            start_date=cfg.current_sprint_start,
+            name=cfg.name,
+            start_date=cfg.start_date,
             end_date=end_date,
             state=SprintState.ACTIVE,
-            team_members=[m["name"] for m in self.cfg.team.get_members()],
+            team_members=[],
         )
         self._save_current_sprint()
         logger.info(f"[SprintManager] Khởi tạo sprint mới: {self._current_sprint.name}")
