@@ -103,38 +103,110 @@ class BaseScraper(ABC):
                 allow_redirects=True,
             )
 
-            # Bước 5: Kiểm tra kết quả
-            if self._is_login_successful(login_resp):
+            # Bước 5: Xử lý OIDC callback (response_mode=form_post)
+            # Sau khi login thành công, Identity Server trả về HTML form
+            # tự submit về /signin-oidc để hoàn tất OIDC flow.
+            # requests không chạy JS nên phải tự submit form này.
+            final_resp = self._handle_oidc_form_post(login_resp)
+            if final_resp is None:
+                final_resp = login_resp
+
+            if self._is_login_successful(final_resp):
                 self._logged_in = True
                 logger.info(f"[Auth] ✅ Đăng nhập thành công: {self.cfg.username}")
                 return True
 
-            logger.error(f"[Auth] ❌ Đăng nhập thất bại (status={login_resp.status_code})")
-            logger.debug(f"[Auth] URL sau login: {login_resp.url}")
+            logger.error(f"[Auth] ❌ Đăng nhập thất bại (status={final_resp.status_code})")
+            logger.debug(f"[Auth] URL sau login: {final_resp.url}")
             return False
 
         except requests.RequestException as e:
             logger.error(f"[Auth] Lỗi kết nối khi đăng nhập: {e}")
             return False
 
+    def _handle_oidc_form_post(self, resp: requests.Response) -> Optional[requests.Response]:
+        """
+        Xử lý OIDC response_mode=form_post.
+
+        Sau khi Identity Server xác thực xong, nó trả về HTML:
+            <form method="post" action="https://app/signin-oidc">
+                <input name="code" value="...">
+                <input name="state" value="...">
+                <script>window.onload = function() { document.forms[0].submit(); }</script>
+            </form>
+
+        requests không chạy JS, nên phải tự parse và submit form này.
+        """
+        soup = BeautifulSoup(resp.text, "lxml")
+
+        # Tìm form có action chứa "signin-oidc" hoặc "callback"
+        form = None
+        for f in soup.find_all("form"):
+            action = f.get("action", "").lower()
+            if "signin-oidc" in action or "callback" in action or "signin" in action:
+                form = f
+                break
+
+        if not form:
+            # Không có OIDC form, có thể đã xong rồi
+            logger.debug("[Auth] Không tìm thấy OIDC form post, bỏ qua bước này")
+            return None
+
+        action_url = form.get("action", "")
+        if not action_url:
+            return None
+
+        # Lấy tất cả hidden fields
+        form_data = {}
+        for inp in form.find_all("input"):
+            name = inp.get("name", "")
+            value = inp.get("value", "")
+            if name:
+                form_data[name] = value
+
+        logger.info(f"[Auth] OIDC form post → {action_url}")
+        logger.debug(f"[Auth] OIDC fields: {list(form_data.keys())}")
+
+        try:
+            callback_resp = self.session.post(
+                action_url,
+                data=form_data,
+                timeout=20,
+                allow_redirects=True,
+            )
+            logger.debug(f"[Auth] OIDC callback status: {callback_resp.status_code}, URL: {callback_resp.url}")
+            return callback_resp
+        except requests.RequestException as e:
+            logger.error(f"[Auth] Lỗi OIDC callback: {e}")
+            return None
+
     def _is_login_successful(self, resp: requests.Response) -> bool:
         """
         Xác định đăng nhập thành công hay không.
-        Logic: Nếu sau POST không bị redirect về trang login = thành công.
+
+        Thành công khi:
+        - URL sau cùng là trang app (không phải trang login)
+        - Không có form login trong HTML
         """
         final_url = resp.url.lower()
-        login_indicators = ["/login", "/signin", "/auth", "login="]
 
-        # Nếu URL cuối cùng vẫn là trang login → thất bại
+        # Nếu đang ở trang op_pm = thành công
+        if "/op_pm" in final_url:
+            return True
+
+        # Nếu vẫn ở trang login = thất bại
+        login_indicators = ["/account/login", "/login?", "login?returnurl"]
         for indicator in login_indicators:
             if indicator in final_url:
                 return False
 
-        # Kiểm tra response có chứa form login không
+        # Kiểm tra HTML có chứa form login không
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "lxml")
-            login_form = soup.find("form", {"action": re.compile(r"login|signin|auth", re.I)})
-            if login_form:
+            # Form login có input Username và Password
+            username_input = soup.find("input", {"name": re.compile(r"^Username$|^username$|^email$", re.I)})
+            password_input = soup.find("input", {"type": "password"})
+            if username_input and password_input:
                 return False
 
         return resp.status_code in (200, 302)
