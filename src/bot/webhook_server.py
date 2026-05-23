@@ -311,7 +311,7 @@ def webhook():
         logger.info(f"[Webhook] Message : {msg.get('text', '(empty)')[:100]}")
 
     if event_type == "ADDED_TO_SPACE":
-        # Gửi chào mừng qua incoming webhook (không dùng response body)
+        logger.info("[Webhook] ── Bước 2: Bot được add vào Space ──")
         _send_reply_async(
             "👋 Xin chào! Tôi là *AI Sprint Assistant*.\n\nGõ `/help` để xem các lệnh hỗ trợ.",
             via_pm=True
@@ -323,26 +323,40 @@ def webhook():
             event.get("message", {}).get("text", "")
             or event.get("message", {}).get("argumentText", "")
         ).strip()
+        logger.info(f"[Webhook] ── Bước 2: Xử lý message ──")
+        logger.info(f"[Webhook] Text nhận: {repr(msg_text)}")
+
         if msg_text:
             reply = handle_pm_message(msg_text, sender)
-            # Gửi reply qua PM webhook thay vì response body
+            logger.info(f"[Webhook] Reply tạo ra: {reply[:80]}...")
             _send_reply_async(reply, via_pm=True)
+        else:
+            logger.warning("[Webhook] Message text rỗng, bỏ qua")
 
-    # Trả về {} để Google Chat biết đã nhận được (không cần parse response)
     return jsonify({}), 200
 
 
 def _send_reply_async(text: str, via_pm: bool = True):
     """Gửi reply qua incoming webhook thay vì HTTP response."""
+    logger.info(f"[Webhook] ── Bước 3: Gửi reply ──")
+    logger.info(f"[Webhook] Kênh: {'PM Space' if via_pm else 'Group'}")
+    logger.info(f"[Webhook] Nội dung: {text[:80]}...")
     try:
         from src.bot.google_chat import GoogleChatBot
+        from config import get_config
+        cfg = get_config()
+        pm_url = cfg.google_chat.pm_webhook_url
+        logger.info(f"[Webhook] PM webhook URL: {'✅ Có' if pm_url else '❌ Chưa cấu hình'}")
+
         bot = GoogleChatBot()
         if via_pm:
-            bot.send_pm(text)
+            ok = bot.send_pm(text)
         else:
-            bot.send_group(text)
+            ok = bot.send_group(text)
+
+        logger.info(f"[Webhook] Gửi reply: {'✅ Thành công' if ok else '❌ Thất bại'}")
     except Exception as e:
-        logger.error(f"[Webhook] Lỗi gửi reply: {e}")
+        logger.error(f"[Webhook] ❌ Lỗi gửi reply: {e}")
 
 
 @app.route("/health", methods=["GET"])
