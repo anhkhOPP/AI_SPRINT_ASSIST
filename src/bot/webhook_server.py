@@ -295,10 +295,20 @@ def webhook():
 
     event = request.get_json(force=True, silent=True)
     if not event:
+        logger.warning("[Webhook] Payload rỗng hoặc không phải JSON")
         return jsonify({"error": "Invalid payload"}), 400
 
     event_type = event.get("type", "")
     sender = event.get("user", {}).get("displayName", "PM")
+
+    # Log mọi event nhận được từ Google Chat
+    logger.info(f"[Webhook] ═══ EVENT RECEIVED ═══")
+    logger.info(f"[Webhook] Type    : {event_type}")
+    logger.info(f"[Webhook] Sender  : {sender}")
+    logger.info(f"[Webhook] Raw keys: {list(event.keys())}")
+    if event_type == "MESSAGE":
+        msg = event.get("message", {})
+        logger.info(f"[Webhook] Message : {msg.get('text', '(empty)')[:100]}")
 
     if event_type == "ADDED_TO_SPACE":
         # Gửi chào mừng qua incoming webhook (không dùng response body)
