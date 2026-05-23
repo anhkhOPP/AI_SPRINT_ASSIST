@@ -160,12 +160,22 @@ class BotServerConfig:
 # ------------------------------------------------------------------
 
 @dataclass
+class GeminiConfig:
+    api_key: str = field(default_factory=lambda: _get("GEMINI_API_KEY", ""))
+    model: str = field(default_factory=lambda: _get("GEMINI_MODEL", "gemini-1.5-flash"))
+
+    def is_enabled(self) -> bool:
+        return bool(self.api_key)
+
+
+@dataclass
 class AppConfig:
     google_chat: GoogleChatConfig = field(default_factory=GoogleChatConfig)
     internal: InternalSiteConfig = field(default_factory=InternalSiteConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     sprint: SprintConfig = field(default_factory=SprintConfig)
     bot_server: BotServerConfig = field(default_factory=BotServerConfig)
+    gemini: GeminiConfig = field(default_factory=GeminiConfig)
     alert_threshold: int = field(
         default_factory=lambda: int(_get("ALERT_THRESHOLD", "3"))
     )

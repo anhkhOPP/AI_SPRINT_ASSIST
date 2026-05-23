@@ -163,17 +163,49 @@ class TaskScheduler:
             logger.error(f"[Task:check_logwork] {e}\n{traceback.format_exc()}")
 
     def task_check_daily(self):
-        """10:00 T2-T6 - Check ai chưa điền daily standup."""
+        """10:00 T2-T6 - Check ai chưa điền daily + tóm tắt AI."""
         try:
             logger.info("[Task] Check daily standup...")
             result = self.daily.fetch_daily_data()
             missing = result.get("missing", [])
+            entries = result.get("entries", [])
 
+            # Báo ai chưa điền
             msg = MessageTemplates.missing_daily_report(missing)
             self.bot.notify_missing_daily(msg)
+
+            # Tóm tắt AI (chỉ khi có đủ người điền)
+            submitted_entries = [e for e in entries if e.get("submitted")]
+            if submitted_entries:
+                self._task_ai_daily_summary(submitted_entries)
+
             logger.info(f"[Task] ✅ Check daily: {len(missing)} chưa điền")
         except Exception as e:
             logger.error(f"[Task:check_daily] {e}\n{traceback.format_exc()}")
+
+    def _task_ai_daily_summary(self, entries: list):
+        """Tóm tắt nội dung daily bằng AI và gửi vào group."""
+        try:
+            from src.ai.gemini import GeminiAI
+            ai = GeminiAI()
+
+            if not ai.enabled:
+                return
+
+            sprint = self.sprint_manager.get_current_sprint()
+            summary = ai.summarize_daily(
+                entries=entries,
+                sprint_name=sprint.name,
+                days_remaining=sprint.days_remaining(),
+            )
+
+            if summary and summary.strip() != "✅ Daily bình thường, không có blockers.":
+                msg = f"🤖 *AI DAILY INSIGHT*\n\n{summary}"
+                self.bot.send_group(msg)
+                logger.info("[Task] ✅ Gửi AI daily summary")
+
+        except Exception as e:
+            logger.error(f"[Task:ai_summary] {e}")
 
     def task_ask_sprint_review(self):
         """Thứ 5 09:00 - Hỏi PM lịch Sprint Review qua DM."""
@@ -257,6 +289,9 @@ class TaskScheduler:
             "ask_review": self.task_ask_sprint_review,
             "ask_planning": self.task_ask_sprint_planning,
             "review_prep": self.task_sprint_review_prep,
+            "ai_summary": lambda: self._task_ai_daily_summary(
+                self.daily.fetch_daily_data().get("entries", [])
+            ),
         }
         fn = tasks.get(task_id)
         if not fn:

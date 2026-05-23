@@ -38,7 +38,7 @@ def get_sprint_manager():
 def handle_pm_message(text: str, sender: str) -> str:
     """
     Xử lý lệnh PM gửi vào Space riêng.
-    Trả về text phản hồi.
+    Hỗ trợ cả lệnh cứng (/set_review) và ngôn ngữ tự nhiên (nhờ Gemini AI).
     """
     text = text.strip()
     logger.info(f"[Webhook] PM '{sender}': {text}")
@@ -55,15 +55,65 @@ def handle_pm_message(text: str, sender: str) -> str:
     if text.lower().startswith("/set_planning"):
         return _cmd_set_planning(text, sender)
 
-    # Hướng dẫn nếu PM nhắn tự do
-    return (
-        "Xin chào! Dùng các lệnh sau:\n\n"
-        "`/set_review DD/MM HH:MM [link]`\n"
-        "`/set_planning DD/MM HH:MM [link]`\n"
-        "`/sprint` - xem thông tin sprint\n"
-        "`/help` - xem trợ giúp\n\n"
-        "_Ví dụ: `/set_review 26/05 14:00 https://meet.google.com/xxx`_"
-    )
+    # Thử dùng AI để hiểu ngôn ngữ tự nhiên
+    return _handle_natural_language(text, sender)
+
+
+def _handle_natural_language(text: str, sender: str) -> str:
+    """Dùng Gemini AI để parse lệnh ngôn ngữ tự nhiên từ PM."""
+    try:
+        from src.ai.gemini import GeminiAI
+        ai = GeminiAI()
+
+        if not ai.enabled:
+            return (
+                "Xin chào! Dùng các lệnh sau:\n\n"
+                "`/set_review DD/MM HH:MM [phòng] [link]`\n"
+                "`/set_planning DD/MM HH:MM [phòng] [link]`\n"
+                "`/sprint` - xem thông tin sprint\n"
+                "`/help` - xem trợ giúp"
+            )
+
+        # Kiểm tra xem text có liên quan đến lịch họp không
+        keywords = ["review", "planning", "họp", "lịch", "ngày", "giờ", "phòng", "sprint"]
+        if not any(kw in text.lower() for kw in keywords):
+            return (
+                "Xin chào! Tôi có thể giúp bạn:\n\n"
+                "📅 Đặt lịch Sprint Review/Planning - chỉ cần nhắn tự nhiên:\n"
+                "_\"họp review ngày 26/5 lúc 2h chiều phòng A3\"_\n\n"
+                "Hoặc dùng lệnh: `/help`"
+            )
+
+        logger.info(f"[AI] Đang parse ngôn ngữ tự nhiên: {text}")
+        parsed = ai.parse_schedule_from_text(text)
+
+        if not parsed or not parsed.get("date"):
+            return (
+                "🤔 Tôi chưa hiểu rõ thông tin lịch họp.\n\n"
+                "Bạn có thể nói rõ hơn không? Ví dụ:\n"
+                "_\"sprint review ngày 26/5, 14:00, phòng A3\"_\n\n"
+                "Hoặc dùng lệnh trực tiếp:\n"
+                "`/set_review 26/05 14:00 Phòng A3`"
+            )
+
+        event_type = parsed.get("event_type", "review")
+        date_str = parsed["date"]
+        time_str = parsed.get("time", "14:00")
+        room = parsed.get("room", "")
+        link = parsed.get("link", "")
+
+        logger.info(f"[AI] Parse thành công: type={event_type} date={date_str} time={time_str} room={room}")
+
+        # Gọi lại handler tương ứng
+        cmd = f"/{event_type}_{'review' if 'review' in event_type else 'planning'}"
+        if event_type == "review":
+            return _cmd_set_review(f"/set_review {date_str} {time_str} {room} {link}", sender)
+        else:
+            return _cmd_set_planning(f"/set_planning {date_str} {time_str} {room} {link}", sender)
+
+    except Exception as e:
+        logger.error(f"[AI] Lỗi xử lý ngôn ngữ tự nhiên: {e}")
+        return "❌ Có lỗi xảy ra. Vui lòng dùng lệnh: `/set_review DD/MM HH:MM`"
 
 
 def _cmd_set_review(text: str, sender: str) -> str:
