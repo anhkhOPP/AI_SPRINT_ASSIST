@@ -315,9 +315,13 @@ def webhook():
 
     logger.info(f"[Webhook] ═══ EVENT RECEIVED ═══")
     logger.info(f"[Webhook] Format : {'Add-on' if chat_data else 'Chat App'}")
-    logger.info(f"[Webhook] Type   : {event_type}")
+    logger.info(f"[Webhook] Type   : {repr(event_type)}")
     logger.info(f"[Webhook] Sender : {sender}")
     logger.info(f"[Webhook] Message: {message_obj.get('text', '(empty)')[:100]}")
+    # Log toàn bộ chat_data để debug
+    import json
+    logger.info(f"[Webhook] chat keys: {list(chat_data.keys()) if chat_data else '(none)'}")
+    logger.info(f"[Webhook] chat data: {json.dumps(chat_data, ensure_ascii=False)[:500]}")
 
     if event_type in ("ADDED_TO_SPACE", "addedToSpace"):
         logger.info("[Webhook] ── Bot được add vào Space ──")
