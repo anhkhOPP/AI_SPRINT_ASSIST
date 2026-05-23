@@ -118,68 +118,85 @@ class TaskScheduler:
     # ------------------------------------------------------------------
 
     def task_daily_meeting_reminder(self):
-        """09:10 T2-T6 - Nhắc họp daily vào group."""
+        """09:10 T2-T6 - Nhắc họp daily (skip T7, CN)."""
         try:
+            from src.utils.schedule_utils import WorkdayCalendar
+            if not WorkdayCalendar.should_send_daily_reminder_today():
+                logger.info("[Task] Daily reminder skipped (not a weekday)")
+                return
             msg = MessageTemplates.daily_meeting_reminder()
             self.bot.notify_daily_meeting(msg)
-            logger.info("[Task] ✅ Nhắc họp daily")
+            logger.info("[Task] ✅ Daily meeting reminder sent")
         except Exception as e:
             logger.error(f"[Task:daily_meeting] {e}")
 
     def task_logwork_reminder(self):
-        """17:30 T2-T6 - Nhắc log work cuối ngày vào group."""
+        """17:30 T2-T7 - Nhắc log work (T7 làm: nhắc 4h)."""
         try:
-            min_hours = self.cfg.internal.logwork_min_hours
+            from src.utils.schedule_utils import WorkdayCalendar
+            if not WorkdayCalendar.should_send_logwork_reminder_today():
+                logger.info("[Task] Logwork reminder skipped (day off)")
+                return
+            min_hours = WorkdayCalendar.get_min_hours(date.today())
             msg = MessageTemplates.logwork_reminder(min_hours)
             self.bot.notify_logwork_reminder(msg)
-            logger.info("[Task] ✅ Nhắc log work")
+            logger.info(f"[Task] ✅ Logwork reminder sent (threshold: {min_hours}h)")
         except Exception as e:
             logger.error(f"[Task:logwork_reminder] {e}")
 
     def task_check_logwork(self):
-        """09:30 T2-T6 - Check ai chưa log đủ giờ hôm qua."""
+        """09:30 T2-T6 - Check logwork ngày làm việc gần nhất.
+        T2: check T7 (nếu T7 làm, threshold 4h) hoặc T6 (nếu T7 nghỉ, threshold 7.5h).
+        """
         try:
-            logger.info("[Task] Check log work hôm qua...")
-            result = self.logwork.fetch_logwork_data()
-            missing = result.get("missing", [])
-            min_hours = self.cfg.internal.logwork_min_hours
+            from src.utils.schedule_utils import WorkdayCalendar
+            should_check, check_date, min_hours = WorkdayCalendar.should_check_logwork_today()
 
-            # Xác định ngày hôm qua (bỏ cuối tuần)
-            yesterday = date.today() - timedelta(days=1)
-            if yesterday.weekday() >= 5:
-                yesterday -= timedelta(days=yesterday.weekday() - 4)
+            if not should_check:
+                logger.info("[Task] Logwork check skipped")
+                return
 
-            msg = MessageTemplates.missing_logwork_report(missing, min_hours, yesterday)
+            logger.info(f"[Task] Checking logwork for {WorkdayCalendar.describe_day(check_date)} ({check_date}), threshold: {min_hours}h")
+            result = self.logwork.fetch_logwork_data(check_date)
+
+            # Re-classify logged/missing với threshold đúng theo ngày
+            all_members = result.get("logged", []) + result.get("missing", [])
+            logged = [m for m in all_members if m.get("hours", 0) >= min_hours]
+            missing = [m for m in all_members if m.get("hours", 0) < min_hours]
+
+            msg = MessageTemplates.missing_logwork_report(missing, min_hours, check_date)
             self.bot.notify_missing_logwork(msg)
 
-            # Cảnh báo thêm nếu quá nhiều người missing
             if len(missing) >= self.cfg.alert_threshold:
                 self.bot.send_group(
-                    f"🚨 Có *{len(missing)} người* chưa log work đủ giờ!\n"
+                    f"🚨 Có *{len(missing)} người* chưa log work đủ {min_hours}h!\n"
                     "PM/Lead cần follow up ngay!"
                 )
-            logger.info(f"[Task] ✅ Logwork check: {len(missing)} missing")
+            logger.info(f"[Task] ✅ Logwork check ({check_date}): {len(logged)} ok, {len(missing)} missing")
         except Exception as e:
             logger.error(f"[Task:check_logwork] {e}\n{traceback.format_exc()}")
 
     def task_check_daily(self):
-        """10:00 T2-T6 - Check ai chưa điền daily + tóm tắt AI."""
+        """10:00 T2-T6 - Check daily standup + AI summary (skip T7, CN)."""
         try:
-            logger.info("[Task] Check daily standup...")
+            from src.utils.schedule_utils import WorkdayCalendar
+            if not WorkdayCalendar.should_check_daily_today():
+                logger.info("[Task] Daily check skipped (Saturday/Sunday)")
+                return
+
+            logger.info("[Task] Checking daily standup...")
             result = self.daily.fetch_daily_data()
             missing = result.get("missing", [])
             entries = result.get("entries", [])
 
-            # Báo ai chưa điền
             msg = MessageTemplates.missing_daily_report(missing)
             self.bot.notify_missing_daily(msg)
 
-            # Tóm tắt AI (chỉ khi có đủ người điền)
             submitted_entries = [e for e in entries if e.get("submitted")]
             if submitted_entries:
                 self._task_ai_daily_summary(submitted_entries)
 
-            logger.info(f"[Task] ✅ Daily check: {len(missing)} chưa điền")
+            logger.info(f"[Task] ✅ Daily check: {len(missing)} missing")
         except Exception as e:
             logger.error(f"[Task:check_daily] {e}\n{traceback.format_exc()}")
 
