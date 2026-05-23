@@ -162,7 +162,7 @@ class BotServerConfig:
 @dataclass
 class GeminiConfig:
     api_key: str = field(default_factory=lambda: _get("GEMINI_API_KEY", ""))
-    model: str = field(default_factory=lambda: _get("GEMINI_MODEL", "gemini-1.5-flash"))
+    model: str = field(default_factory=lambda: _get("GEMINI_MODEL", "gemini-2.0-flash"))
 
     def is_enabled(self) -> bool:
         return bool(self.api_key)

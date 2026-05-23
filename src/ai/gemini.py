@@ -22,7 +22,8 @@ class GeminiAI:
     def __init__(self):
         cfg = get_config()
         self.api_key = cfg.gemini.api_key
-        self.model = cfg.gemini.model
+        # Bỏ prefix "models/" nếu user điền đầy đủ
+        self.model = cfg.gemini.model.replace("models/", "").strip() or "gemini-2.0-flash"
         self.enabled = cfg.gemini.is_enabled()
 
         if not self.enabled:
