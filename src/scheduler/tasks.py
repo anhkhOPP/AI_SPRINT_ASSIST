@@ -186,8 +186,8 @@ class TaskScheduler:
     def _task_ai_daily_summary(self, entries: list):
         """Tóm tắt nội dung daily bằng AI và gửi vào group."""
         try:
-            from src.ai.gemini import GeminiAI
-            ai = GeminiAI()
+            from src.ai import get_ai
+            ai = get_ai()
 
             if not ai.enabled:
                 return

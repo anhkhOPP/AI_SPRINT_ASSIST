@@ -169,6 +169,15 @@ class GeminiConfig:
 
 
 @dataclass
+class ClaudeConfig:
+    api_key: str = field(default_factory=lambda: _get("ANTHROPIC_API_KEY", ""))
+    model: str = field(default_factory=lambda: _get("CLAUDE_MODEL", "claude-haiku-4-5"))
+
+    def is_enabled(self) -> bool:
+        return bool(self.api_key)
+
+
+@dataclass
 class AppConfig:
     google_chat: GoogleChatConfig = field(default_factory=GoogleChatConfig)
     internal: InternalSiteConfig = field(default_factory=InternalSiteConfig)
@@ -176,6 +185,7 @@ class AppConfig:
     sprint: SprintConfig = field(default_factory=SprintConfig)
     bot_server: BotServerConfig = field(default_factory=BotServerConfig)
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
+    claude: ClaudeConfig = field(default_factory=ClaudeConfig)
     alert_threshold: int = field(
         default_factory=lambda: int(_get("ALERT_THRESHOLD", "3"))
     )
