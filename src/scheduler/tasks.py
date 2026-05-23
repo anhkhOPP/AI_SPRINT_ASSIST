@@ -100,6 +100,11 @@ class TaskScheduler:
             (self.task_logwork_reminder,
              CronTrigger(day_of_week=wd, hour=lw_h, minute=lw_m, timezone=tz),
              "Nhắc Log Work cuối ngày"),
+
+            # 12:00 T7: nhắc log work buổi trưa (chỉ T7 làm việc)
+            (self.task_saturday_logwork_reminder,
+             CronTrigger(day_of_week="sat", hour=12, minute=0, timezone=tz),
+             "Nhắc Log Work T7 (12:00)"),
         ]
 
         for fn, trigger, name in jobs:
@@ -199,6 +204,21 @@ class TaskScheduler:
             logger.info(f"[Task] ✅ Daily check: {len(missing)} missing")
         except Exception as e:
             logger.error(f"[Task:check_daily] {e}\n{traceback.format_exc()}")
+
+    def task_saturday_logwork_reminder(self):
+        """12:00 T7 - Nhắc log work buổi trưa (chỉ T7 làm việc tuần 1,4,5)."""
+        try:
+            from src.utils.schedule_utils import WorkdayCalendar
+            today = date.today()
+            if not WorkdayCalendar.is_saturday_workday(today):
+                logger.info(f"[Task] Saturday logwork reminder skipped (week {WorkdayCalendar.week_of_month(today)} = day off)")
+                return
+            min_hours = WorkdayCalendar.get_min_hours(today)
+            msg = MessageTemplates.logwork_reminder(min_hours)
+            self.bot.notify_logwork_reminder(msg)
+            logger.info(f"[Task] ✅ Saturday logwork reminder sent (threshold: {min_hours}h)")
+        except Exception as e:
+            logger.error(f"[Task:saturday_logwork] {e}")
 
     def _task_ai_daily_summary(self, entries: list):
         """Tóm tắt nội dung daily bằng AI và gửi vào group."""
@@ -306,6 +326,7 @@ class TaskScheduler:
             "ask_review": self.task_ask_sprint_review,
             "ask_planning": self.task_ask_sprint_planning,
             "review_prep": self.task_sprint_review_prep,
+            "saturday_logwork": self.task_saturday_logwork_reminder,
             "ai_summary": lambda: self._task_ai_daily_summary(
                 self.daily.fetch_daily_data().get("entries", [])
             ),
