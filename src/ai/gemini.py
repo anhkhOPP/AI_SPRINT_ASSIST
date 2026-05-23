@@ -119,8 +119,9 @@ Yêu cầu:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _call_api(self, prompt: str) -> Optional[str]:
-        """Gọi Gemini API và trả về text response."""
+    def _call_api(self, prompt: str, retry: int = 3) -> Optional[str]:
+        """Gọi Gemini API với retry khi bị rate limit."""
+        import time
         url = self.API_URL.format(model=self.model)
 
         payload = {
@@ -131,31 +132,44 @@ Yêu cầu:
             },
         }
 
-        try:
-            resp = requests.post(
-                url,
-                json=payload,
-                params={"key": self.api_key},
-                timeout=15,
-            )
-
-            if resp.status_code == 200:
-                data = resp.json()
-                text = (
-                    data.get("candidates", [{}])[0]
-                    .get("content", {})
-                    .get("parts", [{}])[0]
-                    .get("text", "")
+        for attempt in range(retry):
+            try:
+                resp = requests.post(
+                    url,
+                    json=payload,
+                    params={"key": self.api_key},
+                    timeout=20,
                 )
-                logger.debug(f"[Gemini] Response: {text[:100]}...")
-                return text
 
-            logger.error(f"[Gemini] API lỗi {resp.status_code}: {resp.text[:200]}")
-            return None
+                if resp.status_code == 200:
+                    data = resp.json()
+                    text = (
+                        data.get("candidates", [{}])[0]
+                        .get("content", {})
+                        .get("parts", [{}])[0]
+                        .get("text", "")
+                    )
+                    logger.debug(f"[Gemini] OK: {text[:80]}...")
+                    return text
 
-        except requests.RequestException as e:
-            logger.error(f"[Gemini] Kết nối lỗi: {e}")
-            return None
+                if resp.status_code == 429:
+                    wait = 10 * (attempt + 1)  # 10s, 20s, 30s
+                    logger.warning(f"[Gemini] Rate limit, chờ {wait}s (lần {attempt+1}/{retry})")
+                    time.sleep(wait)
+                    continue
+
+                logger.error(f"[Gemini] API lỗi {resp.status_code}: {resp.text[:200]}")
+                return None
+
+            except requests.RequestException as e:
+                if attempt < retry - 1:
+                    time.sleep(5)
+                else:
+                    logger.error(f"[Gemini] Kết nối lỗi: {e}")
+                    return None
+
+        logger.error("[Gemini] Hết số lần retry")
+        return None
 
     def _parse_json_response(self, text: str) -> Optional[Dict[str, str]]:
         """Parse JSON từ response của Gemini."""
