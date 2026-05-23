@@ -298,41 +298,52 @@ def webhook():
         logger.warning("[Webhook] Payload rỗng hoặc không phải JSON")
         return jsonify({"error": "Invalid payload"}), 400
 
-    event_type = event.get("type", "")
-    sender = event.get("user", {}).get("displayName", "PM")
+    # Hỗ trợ 2 format:
+    # 1. Chat App: {"type": "MESSAGE", "message": {...}, "user": {...}}
+    # 2. GSuite Add-on: {"chat": {"eventType": "MESSAGE", "message": {...}, "user": {...}}}
+    chat_data = event.get("chat", {})
+    if chat_data:
+        # GSuite Add-on format
+        event_type = chat_data.get("eventType", "")
+        sender = chat_data.get("user", {}).get("displayName", "PM")
+        message_obj = chat_data.get("message", {})
+    else:
+        # Chat App format
+        event_type = event.get("type", "")
+        sender = event.get("user", {}).get("displayName", "PM")
+        message_obj = event.get("message", {})
 
-    # Log mọi event nhận được từ Google Chat
     logger.info(f"[Webhook] ═══ EVENT RECEIVED ═══")
-    logger.info(f"[Webhook] Type    : {event_type}")
-    logger.info(f"[Webhook] Sender  : {sender}")
-    logger.info(f"[Webhook] Raw keys: {list(event.keys())}")
-    if event_type == "MESSAGE":
-        msg = event.get("message", {})
-        logger.info(f"[Webhook] Message : {msg.get('text', '(empty)')[:100]}")
+    logger.info(f"[Webhook] Format : {'Add-on' if chat_data else 'Chat App'}")
+    logger.info(f"[Webhook] Type   : {event_type}")
+    logger.info(f"[Webhook] Sender : {sender}")
+    logger.info(f"[Webhook] Message: {message_obj.get('text', '(empty)')[:100]}")
 
-    if event_type == "ADDED_TO_SPACE":
-        logger.info("[Webhook] ── Bước 2: Bot được add vào Space ──")
+    if event_type in ("ADDED_TO_SPACE", "addedToSpace"):
+        logger.info("[Webhook] ── Bot được add vào Space ──")
         _send_reply_async(
-            "👋 Xin chào! Tôi là *AI Sprint Assistant*.\n\nGõ `/help` để xem các lệnh hỗ trợ.",
+            "👋 Xin chào! Tôi là *AI Sprint Assistant*.\n\nNhắn tin tự nhiên để đặt lịch sprint, hoặc gõ `/help`.",
             via_pm=True
         )
         return jsonify({}), 200
 
-    if event_type == "MESSAGE":
+    if event_type in ("MESSAGE", "message"):
         msg_text = (
-            event.get("message", {}).get("text", "")
-            or event.get("message", {}).get("argumentText", "")
+            message_obj.get("text", "")
+            or message_obj.get("argumentText", "")
         ).strip()
-        logger.info(f"[Webhook] ── Bước 2: Xử lý message ──")
-        logger.info(f"[Webhook] Text nhận: {repr(msg_text)}")
+        logger.info(f"[Webhook] ── Xử lý message ──")
+        logger.info(f"[Webhook] Text: {repr(msg_text)}")
 
         if msg_text:
             reply = handle_pm_message(msg_text, sender)
-            logger.info(f"[Webhook] Reply tạo ra: {reply[:80]}...")
+            logger.info(f"[Webhook] Reply: {reply[:80]}...")
             _send_reply_async(reply, via_pm=True)
         else:
-            logger.warning("[Webhook] Message text rỗng, bỏ qua")
+            logger.warning("[Webhook] Message text rỗng")
+        return jsonify({}), 200
 
+    logger.info(f"[Webhook] Event type không xử lý: {event_type}")
     return jsonify({}), 200
 
 
