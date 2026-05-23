@@ -58,15 +58,15 @@ class TestMessageTemplates:
         assert "Tech Lead" in msg
 
     def test_ask_pm_sprint_review(self):
-        msg = MessageTemplates.ask_pm_sprint_review("Sprint 19")
+        msg = MessageTemplates.ask_pm_sprint_review("Sprint 19", "https://bot.example.com")
         assert "Sprint 19" in msg
-        assert "/set_review" in msg
+        assert "set_review" in msg
         assert "Thứ 5" in msg
 
     def test_ask_pm_sprint_planning(self):
-        msg = MessageTemplates.ask_pm_sprint_planning("Sprint 19", "Sprint 20")
+        msg = MessageTemplates.ask_pm_sprint_planning("Sprint 19", "Sprint 20", "https://bot.example.com")
         assert "Sprint 20" in msg
-        assert "/set_planning" in msg
+        assert "set_planning" in msg
 
     def test_sprint_review_prep_today(self):
         msg = MessageTemplates.sprint_review_prep("Sprint 19", "26/05/2026 14:00", 0)

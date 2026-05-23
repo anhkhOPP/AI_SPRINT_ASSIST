@@ -135,41 +135,51 @@ class MessageTemplates:
     # ================================================================
 
     @staticmethod
-    def ask_pm_sprint_review(sprint_name: str) -> str:
+    def ask_pm_sprint_review(sprint_name: str, public_url: str = "") -> str:
         now = _now_vn()
         date_str = now.strftime("%d/%m/%Y")
+
+        url_section = ""
+        if public_url:
+            url_section = (
+                f"\n\n🔗 *Đặt lịch nhanh bằng cách click link sau* (thay thông tin vào):\n"
+                f"`{public_url}/set_review?date=DD/MM&time=HH:MM&room=Phòng...&link=https://...`\n\n"
+                f"Ví dụ:\n"
+                f"{public_url}/set_review?date=26/05&time=14:00&room=Phòng+A3"
+            )
 
         return (
             f"📅 *HỎI LỊCH SPRINT REVIEW - {sprint_name}*\n\n"
             f"Hôm nay {date_str} (Thứ 5) - sắp đến sprint review rồi!\n\n"
-            "❓ *Sprint Review lần này:*\n"
-            "• Họp ngày nào?\n"
-            "• Mấy giờ bắt đầu?\n"
-            "• Link meeting?\n\n"
-            "Reply theo format:\n"
-            "`/set_review DD/MM HH:MM [link]`\n\n"
-            "_Ví dụ: `/set_review 26/05 14:00 https://meet.google.com/xxx`_"
+            "❓ *Sprint Review lần này họp khi nào?*\n"
+            "• Ngày họp?\n"
+            "• Mấy giờ?\n"
+            "• Phòng họp?\n"
+            f"• Link meeting?{url_section}"
         )
 
-    # ================================================================
-    # 6. HỎI PM LỊCH SPRINT PLANNING (Thứ 2 - gửi DM)
-    # ================================================================
-
     @staticmethod
-    def ask_pm_sprint_planning(sprint_name: str, next_sprint_name: str) -> str:
+    def ask_pm_sprint_planning(sprint_name: str, next_sprint_name: str, public_url: str = "") -> str:
         now = _now_vn()
         date_str = now.strftime("%d/%m/%Y")
+
+        url_section = ""
+        if public_url:
+            url_section = (
+                f"\n\n🔗 *Đặt lịch nhanh bằng cách click link sau*:\n"
+                f"`{public_url}/set_planning?date=DD/MM&time=HH:MM&room=Phòng...`\n\n"
+                f"Ví dụ:\n"
+                f"{public_url}/set_planning?date=27/05&time=09:00&room=Phòng+A3"
+            )
 
         return (
             f"📅 *HỎI LỊCH SPRINT PLANNING - {next_sprint_name}*\n\n"
             f"Hôm nay {date_str} (Thứ 2) - tuần mới bắt đầu!\n\n"
-            "❓ *Sprint Planning lần này:*\n"
-            "• Họp ngày nào?\n"
-            "• Mấy giờ bắt đầu?\n"
-            "• Backlog đã sẵn sàng chưa?\n\n"
-            "Reply theo format:\n"
-            "`/set_planning DD/MM HH:MM [link]`\n\n"
-            "_Ví dụ: `/set_planning 27/05 09:00 https://meet.google.com/xxx`_"
+            "❓ *Sprint Planning lần này họp khi nào?*\n"
+            "• Ngày họp?\n"
+            "• Mấy giờ?\n"
+            "• Phòng họp?\n"
+            f"• Backlog đã sẵn sàng chưa?{url_section}"
         )
 
     # ================================================================

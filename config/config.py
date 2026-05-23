@@ -152,6 +152,7 @@ class BotServerConfig:
     host: str = field(default_factory=lambda: _get("BOT_SERVER_HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(_get("BOT_SERVER_PORT", "5000")))
     secret_token: str = field(default_factory=lambda: _get("BOT_SECRET_TOKEN", ""))
+    public_url: str = field(default_factory=lambda: _get("BOT_PUBLIC_URL", ""))
 
 
 # ------------------------------------------------------------------

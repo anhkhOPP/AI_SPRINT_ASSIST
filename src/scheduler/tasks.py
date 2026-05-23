@@ -186,7 +186,8 @@ class TaskScheduler:
                 logger.info(f"[Task] Sprint Review đã có lịch: {existing.scheduled_date}, bỏ qua")
                 return
 
-            msg = MessageTemplates.ask_pm_sprint_review(sprint.name)
+            public_url = self.cfg.bot_server.public_url
+            msg = MessageTemplates.ask_pm_sprint_review(sprint.name, public_url)
             self.bot.ask_pm_sprint_review(msg)
             logger.info("[Task] ✅ Đã hỏi PM lịch Sprint Review qua DM")
         except Exception as e:
@@ -209,7 +210,8 @@ class TaskScheduler:
             except (ValueError, IndexError):
                 next_name = "tiếp theo"
 
-            msg = MessageTemplates.ask_pm_sprint_planning(sprint.name, next_name)
+            public_url = self.cfg.bot_server.public_url
+            msg = MessageTemplates.ask_pm_sprint_planning(sprint.name, next_name, public_url)
             self.bot.ask_pm_sprint_planning(msg)
             logger.info("[Task] ✅ Đã hỏi PM lịch Sprint Planning qua DM")
         except Exception as e:
