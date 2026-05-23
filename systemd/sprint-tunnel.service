@@ -1,0 +1,30 @@
+[Unit]
+Description=Cloudflare Tunnel for AI Sprint Assistant
+Documentation=https://github.com/anhkhOPP/AI_SPRINT_ASSIST
+After=network.target network-online.target sprint-webhook.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/AI_SPRINT_ASSIST
+
+# Dùng named tunnel nếu có config, fallback quick tunnel
+ExecStart=/bin/bash -c '\
+    if [ -f /root/.cloudflared/config.yml ]; then \
+        /opt/AI_SPRINT_ASSIST/cloudflared tunnel run; \
+    else \
+        /opt/AI_SPRINT_ASSIST/cloudflared tunnel --url http://localhost:5000; \
+    fi'
+
+Restart=on-failure
+RestartSec=15
+StartLimitInterval=120
+StartLimitBurst=3
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sprint-tunnel
+
+[Install]
+WantedBy=multi-user.target

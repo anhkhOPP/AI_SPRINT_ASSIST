@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  sprint-assistant:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: ai-sprint-assistant
+    restart: unless-stopped
+    
+    # Biến môi trường từ file .env
+    env_file:
+      - ../.env
+    
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    
+    volumes:
+      # Persist data và logs
+      - ../data:/app/data
+      - ../logs:/app/logs
+      # Mount credentials (service account JSON nếu có)
+      - ../credentials:/app/credentials:ro
+    
+    ports:
+      - "5000:5000"
+    
+    # Giới hạn tài nguyên (bot này rất nhẹ)
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Nginx reverse proxy (bỏ comment nếu cần HTTPS)
+  # nginx:
+  #   image: nginx:alpine
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+  #   depends_on:
+  #     - sprint-assistant
