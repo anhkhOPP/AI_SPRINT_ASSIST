@@ -37,10 +37,13 @@ logger.add(
     format="<green>{time:HH:mm:ss}</green> | <level>{level:<8}</level> | <level>{message}</level>",
     level="INFO",
 )
+import os as _os
+_log_file = "/var/log/sprint-bot/app.log" if _os.path.isdir("/var/log/sprint-bot") else "logs/sprint_assistant.log"
 logger.add(
-    "logs/sprint_assistant.log",
-    rotation="10 MB",
+    _log_file,
+    rotation="50 MB",
     retention="30 days",
+    compression="gz",
     level="DEBUG",
     encoding="utf-8",
 )

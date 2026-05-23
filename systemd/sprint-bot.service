@@ -1,0 +1,33 @@
+[Unit]
+Description=AI Sprint Assistant Bot (Scheduler)
+Documentation=https://github.com/anhkhOPP/AI_SPRINT_ASSIST
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/AI_SPRINT_ASSIST
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Dùng venv nếu có, fallback python3 hệ thống
+ExecStart=/bin/bash -c '\
+    if [ -f /opt/AI_SPRINT_ASSIST/venv/bin/python3 ]; then \
+        /opt/AI_SPRINT_ASSIST/venv/bin/python3 main.py --scheduler-only; \
+    else \
+        python3 main.py --scheduler-only; \
+    fi'
+
+Restart=on-failure
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Log ra systemd journal (xem bằng journalctl)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sprint-bot
+
+[Install]
+WantedBy=multi-user.target

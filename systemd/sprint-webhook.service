@@ -1,0 +1,31 @@
+[Unit]
+Description=AI Sprint Assistant Webhook Server
+Documentation=https://github.com/anhkhOPP/AI_SPRINT_ASSIST
+After=network.target network-online.target sprint-bot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/AI_SPRINT_ASSIST
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+ExecStart=/bin/bash -c '\
+    if [ -f /opt/AI_SPRINT_ASSIST/venv/bin/python3 ]; then \
+        /opt/AI_SPRINT_ASSIST/venv/bin/python3 -c "from src.bot.webhook_server import run_server; run_server()"; \
+    else \
+        python3 -c "from src.bot.webhook_server import run_server; run_server()"; \
+    fi'
+
+Restart=on-failure
+RestartSec=5
+StartLimitInterval=60
+StartLimitBurst=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sprint-webhook
+
+[Install]
+WantedBy=multi-user.target
