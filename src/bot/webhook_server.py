@@ -301,8 +301,12 @@ def webhook():
     sender = event.get("user", {}).get("displayName", "PM")
 
     if event_type == "ADDED_TO_SPACE":
-        text = "👋 Xin chào! Tôi là *AI Sprint Assistant*.\n\nGõ `/help` để xem các lệnh hỗ trợ."
-        return jsonify(_chat_response(text))
+        # Gửi chào mừng qua incoming webhook (không dùng response body)
+        _send_reply_async(
+            "👋 Xin chào! Tôi là *AI Sprint Assistant*.\n\nGõ `/help` để xem các lệnh hỗ trợ.",
+            via_pm=True
+        )
+        return jsonify({}), 200
 
     if event_type == "MESSAGE":
         msg_text = (
@@ -311,30 +315,24 @@ def webhook():
         ).strip()
         if msg_text:
             reply = handle_pm_message(msg_text, sender)
-            return jsonify(_chat_response(reply))
+            # Gửi reply qua PM webhook thay vì response body
+            _send_reply_async(reply, via_pm=True)
 
-    return jsonify(_chat_response("")), 200
+    # Trả về {} để Google Chat biết đã nhận được (không cần parse response)
+    return jsonify({}), 200
 
 
-def _chat_response(text: str) -> dict:
-    """
-    Trả về response đúng format cho Google Chat Add-on.
-    Hỗ trợ cả Chat App thuần và GSuite Add-on.
-    """
-    if not text:
-        return {}
-    # Format cho GSuite Add-on (g_suite_add_ons)
-    return {
-        "hostAppAction": {
-            "chatAction": {
-                "createMessageAction": {
-                    "message": {
-                        "text": text
-                    }
-                }
-            }
-        }
-    }
+def _send_reply_async(text: str, via_pm: bool = True):
+    """Gửi reply qua incoming webhook thay vì HTTP response."""
+    try:
+        from src.bot.google_chat import GoogleChatBot
+        bot = GoogleChatBot()
+        if via_pm:
+            bot.send_pm(text)
+        else:
+            bot.send_group(text)
+    except Exception as e:
+        logger.error(f"[Webhook] Lỗi gửi reply: {e}")
 
 
 @app.route("/health", methods=["GET"])
