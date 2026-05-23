@@ -301,20 +301,40 @@ def webhook():
     sender = event.get("user", {}).get("displayName", "PM")
 
     if event_type == "ADDED_TO_SPACE":
-        return jsonify({
-            "text": (
-                "👋 Xin chào! Tôi là *AI Sprint Assistant*.\n\n"
-                "Gõ `/help` để xem các lệnh hỗ trợ."
-            )
-        })
+        text = "👋 Xin chào! Tôi là *AI Sprint Assistant*.\n\nGõ `/help` để xem các lệnh hỗ trợ."
+        return jsonify(_chat_response(text))
 
     if event_type == "MESSAGE":
-        msg_text = event.get("message", {}).get("text", "").strip()
+        msg_text = (
+            event.get("message", {}).get("text", "")
+            or event.get("message", {}).get("argumentText", "")
+        ).strip()
         if msg_text:
             reply = handle_pm_message(msg_text, sender)
-            return jsonify({"text": reply})
+            return jsonify(_chat_response(reply))
 
-    return jsonify({"text": ""}), 200
+    return jsonify(_chat_response("")), 200
+
+
+def _chat_response(text: str) -> dict:
+    """
+    Trả về response đúng format cho Google Chat Add-on.
+    Hỗ trợ cả Chat App thuần và GSuite Add-on.
+    """
+    if not text:
+        return {}
+    # Format cho GSuite Add-on (g_suite_add_ons)
+    return {
+        "hostAppAction": {
+            "chatAction": {
+                "createMessageAction": {
+                    "message": {
+                        "text": text
+                    }
+                }
+            }
+        }
+    }
 
 
 @app.route("/health", methods=["GET"])
