@@ -303,10 +303,13 @@ def webhook():
     # 2. GSuite Add-on: {"chat": {"eventType": "MESSAGE", "message": {...}, "user": {...}}}
     chat_data = event.get("chat", {})
     if chat_data:
-        # GSuite Add-on format
-        event_type = chat_data.get("eventType", "")
+        # GSuite Add-on format:
+        # chat.user, chat.eventTime, chat.messagePayload.message.text
         sender = chat_data.get("user", {}).get("displayName", "PM")
-        message_obj = chat_data.get("message", {})
+        payload = chat_data.get("messagePayload", {})
+        message_obj = payload.get("message", payload)  # fallback: dùng payload trực tiếp
+        # Nếu có messagePayload → đây là MESSAGE event
+        event_type = "MESSAGE" if payload else chat_data.get("eventType", "")
     else:
         # Chat App format
         event_type = event.get("type", "")
