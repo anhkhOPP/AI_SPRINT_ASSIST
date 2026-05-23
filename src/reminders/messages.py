@@ -127,7 +127,7 @@ class MessageTemplates:
             f"⚠️ *CHƯA ĐIỀN DAILY - {date_str}*\n\n"
             f"*{count} người* chưa điền daily hôm nay:\n\n"
             f"{member_list}\n\n"
-            "Điền trước khi họp nhé! ⏰"
+            "Điền sau khi họp daily nhé! ⏰"
         )
 
     # ================================================================
