@@ -14,7 +14,7 @@ Các task_id để test:
   check_daily     - Check ai chưa điền daily
   ask_review      - Hỏi PM lịch Sprint Review (DM)
   ask_planning    - Hỏi PM lịch Sprint Planning (DM)
-  review_prep     - Nhắc chuẩn bị Sprint Review
+  review_prep     - Sprint Review prep reminder
 """
 import sys
 import time
@@ -62,7 +62,7 @@ BANNER = """
 ║  09:10 T2-T6  → Nhắc họp Daily (group)              ║
 ║  09:30 T2-T6  → Check Log Work hôm qua (group)      ║
 ║  10:00 T2-T6  → Check Daily Standup (group)         ║
-║  16:00 T2-T6  → Nhắc chuẩn bị Sprint Review         ║
+║  16:00 T2-T6  → Sprint Review prep reminder         ║
 ║  17:30 T2-T6  → Nhắc Log Work cuối ngày (group)     ║
 ╚══════════════════════════════════════════════════════╝
 """
@@ -75,11 +75,11 @@ def run_full(scheduler_only: bool = False):
     print(BANNER)
     cfg = get_config()
 
-    logger.info(f"Sprint hiện tại : {cfg.sprint.name}")
-    logger.info(f"Trang nội bộ    : {cfg.internal.base_url}")
-    logger.info(f"Ngưỡng log work : {cfg.internal.logwork_min_hours}h/ngày")
-    logger.info(f"Webhook group   : {'✅' if cfg.google_chat.group_webhook_url else '❌ Chưa cấu hình'}")
-    logger.info(f"Webhook PM (DM) : {'✅' if cfg.google_chat.pm_webhook_url else '⚠️  Chưa cấu hình'}")
+    logger.info(f"Current sprint  : {cfg.sprint.name}")
+    logger.info(f"Internal URL    : {cfg.internal.base_url}")
+    logger.info(f"Logwork threshold: {cfg.internal.logwork_min_hours}h/ngày")
+    logger.info(f"Group webhook   : {'✅' if cfg.google_chat.group_webhook_url else '❌ Not configured'}")
+    logger.info(f"PM webhook (DM) : {'✅' if cfg.google_chat.pm_webhook_url else '⚠️  Not configured'}")
 
     scheduler = TaskScheduler()
     scheduler.start()
@@ -91,14 +91,14 @@ def run_full(scheduler_only: bool = False):
         logger.info(f"Webhook server  : http://{cfg.bot_server.host}:{cfg.bot_server.port}")
 
     def shutdown(sig, frame):
-        logger.info("Đang dừng bot...")
+        logger.info("Stopping bot...")
         scheduler.stop()
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
 
-    logger.info("✅ Bot đang chạy. Nhấn Ctrl+C để dừng.\n")
+    logger.info("✅ Bot running. Press Ctrl+C to stop.\n")
     try:
         while True:
             time.sleep(60)

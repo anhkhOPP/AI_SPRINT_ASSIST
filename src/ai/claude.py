@@ -27,7 +27,7 @@ class ClaudeAI:
         self.enabled = cfg.claude.is_enabled()
 
         if not self.enabled:
-            logger.warning("[Claude] ANTHROPIC_API_KEY chưa cấu hình.")
+            logger.warning("[Claude] ANTHROPIC_API_KEY not configured.")
 
     # ------------------------------------------------------------------
     # Tính năng 1: Parse lịch họp từ ngôn ngữ tự nhiên
@@ -49,13 +49,13 @@ class ClaudeAI:
 Văn bản: "{text}"
 
 Trả về JSON với các trường:
-- date: ngày dạng DD/MM (ví dụ "30/05"), để "" nếu không có
-- time: giờ dạng HH:MM 24h (ví dụ "14:00"), để "" nếu không có
-- room: tên phòng họp, để "" nếu không có
-- link: link meeting nếu có, để "" nếu không có
+- date: ngày dạng DD/MM (ví dụ "30/05"), để "" nếu none
+- time: giờ dạng HH:MM 24h (ví dụ "14:00"), để "" nếu none
+- room: tên phòng họp, để "" nếu none
+- link: link meeting nếu có, để "" nếu none
 - event_type: "review" nếu sprint review, "planning" nếu sprint planning
 
-Chỉ trả về JSON, không có text khác."""
+Chỉ trả về JSON, none text khác."""
 
         response = self._call_api(prompt)
         if not response:
@@ -84,7 +84,7 @@ Chỉ trả về JSON, không có text khác."""
 
         prompt = f"""Bạn là Scrum Master AI. Hãy phân tích daily standup của nhóm phần mềm.
 
-Sprint: {sprint_name} (còn {days_remaining} ngày)
+Sprint: {sprint_name} (remaining {days_remaining} ngày)
 
 Nội dung daily:
 {daily_content}
@@ -93,7 +93,7 @@ Yêu cầu:
 - Chỉ nêu các điểm đáng chú ý (blockers, rủi ro, conflict tiềm ẩn, task chậm tiến độ)
 - Ngắn gọn tối đa 5 dòng
 - Dùng emoji phù hợp
-- Nếu không có gì đặc biệt: trả về đúng "✅ Daily bình thường, không có blockers."
+- Nếu none gì đặc biệt: trả về đúng "✅ Daily bình thường, none blockers."
 - KHÔNG liệt kê lại công việc của từng người"""
 
         return self._call_api(prompt)
@@ -132,18 +132,18 @@ Yêu cầu:
 
                 if resp.status_code == 429:
                     wait = 10 * (attempt + 1)
-                    logger.warning(f"[Claude] Rate limit, chờ {wait}s")
+                    logger.warning(f"[Claude] Rate limit, waiting {wait}s")
                     time.sleep(wait)
                     continue
 
-                logger.error(f"[Claude] API lỗi {resp.status_code}: {resp.text[:200]}")
+                logger.error(f"[Claude] API error {resp.status_code}: {resp.text[:200]}")
                 return None
 
             except requests.RequestException as e:
                 if attempt < retry - 1:
                     time.sleep(5)
                 else:
-                    logger.error(f"[Claude] Kết nối lỗi: {e}")
+                    logger.error(f"[Claude] Connection error: {e}")
                     return None
 
         return None

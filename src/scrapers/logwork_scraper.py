@@ -7,7 +7,7 @@ Response JSON: {"data": [{"logByUserId": "uuid", "spentTime": 7.5, "logByUser": 
 Logic:
 - Group by logByUserId → cộng tổng spentTime
 - Match UUID với team.json → lấy tên đầy đủ + position
-- Ai tổng < 7.5h hoặc không log = thiếu
+- Ai tổng < 7.5h hoặc không log = missing
 """
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Any
@@ -60,7 +60,7 @@ class LogworkScraper(BaseScraper):
             target_date = self._get_last_workday()
 
         if not self.cfg.worklog_url:
-            logger.warning("[Logwork] INTERNAL_WORKLOG_URL chưa cấu hình → dùng mock")
+            logger.warning("[Logwork] INTERNAL_WORKLOG_URL not set → using mock")
             return self._mock_data()
 
         self.ensure_logged_in()
@@ -83,7 +83,7 @@ class LogworkScraper(BaseScraper):
             )
 
             if resp.status_code != 200:
-                logger.error(f"[Logwork] API lỗi: {resp.status_code}")
+                logger.error(f"[Logwork] API error: {resp.status_code}")
                 return self._mock_data()
 
             data = resp.json()
@@ -138,7 +138,7 @@ class LogworkScraper(BaseScraper):
     def _parse_api_response(self, data: dict, target_date: date) -> Dict[str, Any]:
         """Parse JSON response từ DataTables API."""
         records = data.get("data", [])
-        logger.info(f"[Logwork] Nhận {len(records)} records từ API")
+        logger.info(f"[Logwork] Received {len(records)} records from API")
 
         # Group by logByUserId → tổng spentTime
         uid_hours: Dict[str, float] = {}
@@ -175,8 +175,8 @@ class LogworkScraper(BaseScraper):
 
         total = sum(uid_hours.values())
         logger.info(
-            f"[Logwork] {len(logged)} đủ giờ, {len(missing)} thiếu "
-            f"(ngưỡng: {self.min_hours}h, ngày: {target_date})"
+            f"[Logwork] {len(logged)} passed, {len(missing)} missing "
+            f"(threshold: {self.min_hours}h, date: {target_date})"
         )
 
         return {
@@ -200,7 +200,7 @@ class LogworkScraper(BaseScraper):
         return yesterday
 
     def _mock_data(self) -> Dict[str, Any]:
-        logger.info("[Logwork] Dùng MOCK data")
+        logger.info("[Logwork] Using MOCK data")
         result = {"logged": [], "missing": [], "summary": {}}
         for i, m in enumerate(self.team):
             hours = 8.0 if i % 3 != 2 else 3.0

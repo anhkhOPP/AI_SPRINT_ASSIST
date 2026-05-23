@@ -38,7 +38,7 @@ class GoogleChatBot:
     def send_pm(self, text: str) -> bool:
         """Gửi tin nhắn vào Space riêng của PM."""
         if not self._pm_url:
-            logger.warning("[Bot] PM webhook chưa cấu hình (GOOGLE_CHAT_PM_WEBHOOK_URL)")
+            logger.warning("[Bot] PM webhook not configured (GOOGLE_CHAT_PM_WEBHOOK_URL)")
             return False
         return self._post(self._pm_url, {"text": text})
 
@@ -79,7 +79,7 @@ class GoogleChatBot:
 
     def _post(self, url: str, payload: dict) -> bool:
         if not url:
-            logger.warning("[Bot] Webhook URL trống, bỏ qua.")
+            logger.warning("[Bot] Webhook URL empty, skipping.")
             return False
         try:
             resp = self._session.post(
@@ -90,8 +90,8 @@ class GoogleChatBot:
             if resp.status_code in (200, 201):
                 logger.debug(f"[Bot] Gửi OK → {url[:60]}...")
                 return True
-            logger.error(f"[Bot] Gửi thất bại {resp.status_code}: {resp.text[:200]}")
+            logger.error(f"[Bot] Send failed {resp.status_code}: {resp.text[:200]}")
             return False
         except requests.RequestException as e:
-            logger.error(f"[Bot] Lỗi kết nối: {e}")
+            logger.error(f"[Bot] Connection error: {e}")
             return False

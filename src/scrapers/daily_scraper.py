@@ -58,7 +58,7 @@ class DailyScraper(BaseScraper):
             target_date = date.today()
 
         if not self.parent_url:
-            logger.warning("[Daily] INTERNAL_DAILY_PARENT_URL chưa cấu hình → dùng mock data")
+            logger.warning("[Daily] INTERNAL_DAILY_PARENT_URL not set → using mock data")
             return self._mock_data(target_date)
 
         # Lấy parent document ID từ URL
@@ -69,7 +69,7 @@ class DailyScraper(BaseScraper):
         logger.info(f"[Daily] GET Print URL: {print_url}")
         resp = self.get(print_url)
         if not resp:
-            logger.error("[Daily] Không tải được Print URL")
+            logger.error("[Daily] Failed to load Print URL")
             return self._not_found_result(target_date)
 
         return self._parse_print_html(resp.text, target_date, print_url)
@@ -85,7 +85,7 @@ class DailyScraper(BaseScraper):
         Navigation tree được nhúng dưới dạng JSON trong HTML trang cha.
         Mỗi entry có dạng: {"id":"uuid","name":"Daily Meeting X - DD-MMM-YYYY",...}
         """
-        logger.info(f"[Daily] Tìm document ngày {target_date} trong: {self.parent_url}")
+        logger.info(f"[Daily] Looking for document for date {target_date} trong: {self.parent_url}")
         resp = self.get(self.parent_url)
         if not resp:
             return None
@@ -114,7 +114,7 @@ class DailyScraper(BaseScraper):
 
             if target_str.lower() in name.lower():
                 url = f"{base}/HtmlDocument/Detail/{parent_id}?docNavId={nav_id}"
-                logger.info(f"[Daily] Tìm thấy: {name!r} → {url}")
+                logger.info(f"[Daily] Found: {name!r} → {url}")
                 return url
 
         logger.warning(f"[Daily] Không tìm thấy document '{target_str}'")
@@ -142,12 +142,12 @@ class DailyScraper(BaseScraper):
             logger.warning(f"[Daily] Không tìm thấy '{target_str}' trong Print HTML")
             return self._not_found_result(target_date)
 
-        logger.info(f"[Daily] Tìm thấy '{target_str}' tại vị trí {idx}")
+        logger.info(f"[Daily] Found '{target_str}' at position {idx}")
 
         # Tìm <table sau vị trí ngày đó
         table_start = html.find("<table", idx)
         if table_start < 0:
-            logger.warning(f"[Daily] Không tìm thấy <table sau '{target_str}'")
+            logger.warning(f"[Daily] Table not found after sau '{target_str}'")
             return self._not_found_result(target_date)
 
         # Tìm </table> tương ứng (có thể lồng nhau)
@@ -165,7 +165,7 @@ class DailyScraper(BaseScraper):
         table = soup.find("table")
 
         if not table:
-            logger.warning("[Daily] Không parse được bảng từ HTML")
+            logger.warning("[Daily] Failed to parse table từ HTML")
             return self._not_found_result(target_date)
 
         return self._parse_table(table, target_date, doc_url)
@@ -437,7 +437,7 @@ class DailyScraper(BaseScraper):
 
     def _mock_data(self, target_date: date) -> Dict[str, Any]:
         """Mock data khi URL chưa cấu hình."""
-        logger.info("[Daily] Dùng MOCK data")
+        logger.info("[Daily] Using MOCK data")
         submitted = []
         missing = []
         entries = []

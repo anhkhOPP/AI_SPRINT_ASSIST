@@ -1,5 +1,5 @@
 """
-Flask Webhook Server - Nhận reply từ PM qua Google Chat.
+Flask Webhook Server - Received reply từ PM qua Google Chat.
 
 Khi PM reply trong Space riêng (DM-like), Google Chat gọi endpoint này.
 PM dùng các lệnh:
@@ -218,7 +218,7 @@ def _help_text() -> str:
         "→ Xem thông tin sprint hiện tại\n\n"
         "`/help`\n"
         "→ Xem trợ giúp này\n\n"
-        "_Format ngày: DD/MM (năm tự lấy hiện tại)_\n"
+        "_Format date: DD/MM (năm tự lấy hiện tại)_\n"
         "_Format giờ: HH:MM (24h)_"
     )
 
@@ -239,7 +239,7 @@ def _parse_event_command(text: str):
 
     args = parts[1].strip()
 
-    # Tìm ngày: DD/MM hoặc DD-MM
+    # Tìm date: DD/MM hoặc DD-MM
     date_match = re.search(r"(\d{1,2})[/\-](\d{1,2})", args)
     if not date_match:
         return None
@@ -295,7 +295,7 @@ def webhook():
 
     event = request.get_json(force=True, silent=True)
     if not event:
-        logger.warning("[Webhook] Payload rỗng hoặc không phải JSON")
+        logger.warning("[Webhook] Empty or invalid JSON payload")
         return jsonify({"error": "Invalid payload"}), 400
 
     # Hỗ trợ 2 format:
@@ -327,7 +327,7 @@ def webhook():
     logger.info(f"[Webhook] chat data: {json.dumps(chat_data, ensure_ascii=False)[:500]}")
 
     if event_type in ("ADDED_TO_SPACE", "addedToSpace"):
-        logger.info("[Webhook] ── Bot được add vào Space ──")
+        logger.info("[Webhook] ── Bot added to Space ──")
         _send_reply_async(
             "👋 Xin chào! Tôi là *AI Sprint Assistant*.\n\nNhắn tin tự nhiên để đặt lịch sprint, hoặc gõ `/help`.",
             via_pm=True
@@ -339,7 +339,7 @@ def webhook():
             message_obj.get("text", "")
             or message_obj.get("argumentText", "")
         ).strip()
-        logger.info(f"[Webhook] ── Xử lý message ──")
+        logger.info(f"[Webhook] ── Processing message ──")
         logger.info(f"[Webhook] Text: {repr(msg_text)}")
 
         if msg_text:
@@ -350,21 +350,21 @@ def webhook():
             logger.warning("[Webhook] Message text rỗng")
         return jsonify({}), 200
 
-    logger.info(f"[Webhook] Event type không xử lý: {event_type}")
+    logger.info(f"[Webhook] Unhandled event type: {event_type}")
     return jsonify({}), 200
 
 
 def _send_reply_async(text: str, via_pm: bool = True):
     """Gửi reply qua incoming webhook thay vì HTTP response."""
     logger.info(f"[Webhook] ── Bước 3: Gửi reply ──")
-    logger.info(f"[Webhook] Kênh: {'PM Space' if via_pm else 'Group'}")
-    logger.info(f"[Webhook] Nội dung: {text[:80]}...")
+    logger.info(f"[Webhook] Channel: {'PM Space' if via_pm else 'Group'}")
+    logger.info(f"[Webhook] Content: {text[:80]}...")
     try:
         from src.bot.google_chat import GoogleChatBot
         from config import get_config
         cfg = get_config()
         pm_url = cfg.google_chat.pm_webhook_url
-        logger.info(f"[Webhook] PM webhook URL: {'✅ Có' if pm_url else '❌ Chưa cấu hình'}")
+        logger.info(f"[Webhook] PM webhook URL: {'✅ Có' if pm_url else '❌ Not configured'}")
 
         bot = GoogleChatBot()
         if via_pm:
@@ -372,9 +372,9 @@ def _send_reply_async(text: str, via_pm: bool = True):
         else:
             ok = bot.send_group(text)
 
-        logger.info(f"[Webhook] Gửi reply: {'✅ Thành công' if ok else '❌ Thất bại'}")
+        logger.info(f"[Webhook] Send reply: {'✅ Thành công' if ok else '❌ Thất bại'}")
     except Exception as e:
-        logger.error(f"[Webhook] ❌ Lỗi gửi reply: {e}")
+        logger.error(f"[Webhook] ❌ Reply send error: {e}")
 
 
 @app.route("/health", methods=["GET"])
@@ -420,5 +420,5 @@ def api_set_planning():
 
 def run_server():
     cfg = get_config()
-    logger.info(f"[Server] Khởi động tại {cfg.bot_server.host}:{cfg.bot_server.port}")
+    logger.info(f"[Server] Starting at {cfg.bot_server.host}:{cfg.bot_server.port}")
     app.run(host=cfg.bot_server.host, port=cfg.bot_server.port, debug=False)

@@ -6,7 +6,7 @@ from typing import Optional, Dict, List
 class AIClient:
     """
     AI Client với fallback tự động: Gemini → Claude.
-    Nếu Gemini lỗi/không có key → tự chuyển sang Claude.
+    Nếu Gemini error/none key → tự chuyển sang Claude.
     """
 
     def __init__(self):
@@ -18,13 +18,13 @@ class AIClient:
 
         if self._gemini:
             primary = f"Gemini ({self._gemini.model})"
-            backup = f"Claude ({self._claude.model})" if self._claude else "không có"
+            backup = f"Claude ({self._claude.model})" if self._claude else "none"
         elif self._claude:
             primary = f"Claude ({self._claude.model})"
-            backup = "không có"
+            backup = "none"
         else:
-            primary = "không có"
-            backup = "không có"
+            primary = "none"
+            backup = "none"
 
         from loguru import logger
         logger.info(f"[AI] Primary: {primary} | Backup: {backup}")
@@ -34,7 +34,7 @@ class AIClient:
         result = self._try_gemini("parse_schedule_from_text", text)
         if result is None and self._claude:
             from loguru import logger
-            logger.info("[AI] Gemini thất bại → chuyển sang Claude")
+            logger.info("[AI] Gemini failed → switching to Claude")
             result = self._claude.parse_schedule_from_text(text)
         return result
 
@@ -45,19 +45,19 @@ class AIClient:
         result = self._try_gemini("summarize_daily", entries, sprint_name, days_remaining)
         if result is None and self._claude:
             from loguru import logger
-            logger.info("[AI] Gemini thất bại → chuyển sang Claude")
+            logger.info("[AI] Gemini failed → switching to Claude")
             result = self._claude.summarize_daily(entries, sprint_name, days_remaining)
         return result
 
     def _try_gemini(self, method: str, *args):
-        """Gọi Gemini, trả về None nếu không có hoặc lỗi."""
+        """Gọi Gemini, trả về None nếu none hoặc lỗi."""
         if not self._gemini:
             return None
         try:
             return getattr(self._gemini, method)(*args)
         except Exception as e:
             from loguru import logger
-            logger.warning(f"[AI] Gemini lỗi ({method}): {e}")
+            logger.warning(f"[AI] Gemini error ({method}): {e}")
             return None
 
 

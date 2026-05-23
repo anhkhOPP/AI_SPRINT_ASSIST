@@ -15,7 +15,7 @@ def _now_vn() -> datetime:
 
 
 def _format_missing_list(members: List[Dict]) -> str:
-    """Format danh sách thành viên thiếu kèm position."""
+    """Format danh sách thành viên missing kèm position."""
     lines = []
     for m in members:
         name = m.get("name", "")

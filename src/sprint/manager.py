@@ -184,7 +184,7 @@ class SprintManager:
         sprint.events.append(event.to_dict())
         self._save_current_sprint()
 
-        logger.info(f"[SprintManager] Đã cập nhật {event_type}: {scheduled_date} {scheduled_time}")
+        logger.info(f"[SprintManager] Updated {event_type}: {scheduled_date} {scheduled_time}")
         return event
 
     def advance_sprint(self) -> Sprint:
@@ -217,7 +217,7 @@ class SprintManager:
         self._current_sprint = new_sprint
         self._save_current_sprint()
 
-        logger.info(f"[SprintManager] Sprint mới: {new_name} ({new_start} - {new_end})")
+        logger.info(f"[SprintManager] New sprint: {new_name} ({new_start} - {new_end})")
         return new_sprint
 
     def update_metrics(
@@ -321,7 +321,7 @@ class SprintManager:
                     logger.info(f"[SprintManager] Loaded sprint: {self._current_sprint.name}")
                     return
             except Exception as e:
-                logger.warning(f"[SprintManager] Lỗi load sprint file: {e}, khởi tạo từ config")
+                logger.warning(f"[SprintManager] Error loading sprint file: {e}, khởi tạo từ config")
 
         # Khởi tạo từ config
         cfg = self.cfg.sprint
@@ -334,7 +334,7 @@ class SprintManager:
             team_members=[],
         )
         self._save_current_sprint()
-        logger.info(f"[SprintManager] Khởi tạo sprint mới: {self._current_sprint.name}")
+        logger.info(f"[SprintManager] Initialized new sprint: {self._current_sprint.name}")
 
     def _save_current_sprint(self):
         """Lưu sprint hiện tại vào file."""
@@ -342,7 +342,7 @@ class SprintManager:
             with open(self.CURRENT_SPRINT_FILE, "w", encoding="utf-8") as f:
                 json.dump(self._current_sprint.to_dict(), f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.error(f"[SprintManager] Lỗi lưu sprint: {e}")
+            logger.error(f"[SprintManager] Error saving sprint: {e}")
 
     def _archive_sprint(self, sprint: Sprint):
         """Lưu sprint đã kết thúc vào lịch sử."""
@@ -354,9 +354,9 @@ class SprintManager:
             history.append(sprint.to_dict())
             with open(self.SPRINT_FILE, "w", encoding="utf-8") as f:
                 json.dump(history, f, ensure_ascii=False, indent=2)
-            logger.info(f"[SprintManager] Đã archive sprint: {sprint.name}")
+            logger.info(f"[SprintManager] Archived sprint: {sprint.name}")
         except Exception as e:
-            logger.error(f"[SprintManager] Lỗi archive sprint: {e}")
+            logger.error(f"[SprintManager] Error archiving sprint: {e}")
 
     def get_sprint_history(self) -> List[Sprint]:
         """Lấy lịch sử tất cả sprints."""

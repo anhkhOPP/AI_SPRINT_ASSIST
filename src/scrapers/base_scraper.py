@@ -92,7 +92,7 @@ class BaseScraper(ABC):
                 timeout=20,
                 allow_redirects=True,
             )
-            logger.debug(f"[Auth] Sau POST login: url={r2.url} status={r2.status_code}")
+            logger.debug(f"[Auth] After POST login: url={r2.url} status={r2.status_code}")
 
             current_resp = r2
 
@@ -111,21 +111,21 @@ class BaseScraper(ABC):
                         allow_redirects=True,
                     )
                     current_resp = r3
-                    logger.debug(f"[Auth] Sau signin-oidc: {current_resp.url} status={current_resp.status_code}")
+                    logger.debug(f"[Auth] After signin-oidc: {current_resp.url} status={current_resp.status_code}")
                 else:
                     logger.debug(f"[Auth] Không có OIDC form (có thể đã logged in), URL: {current_resp.url}")
 
             # --- Bước 6: Kiểm tra đã vào được op_pm chưa ---
             if self._is_logged_in(current_resp):
                 self._logged_in = True
-                logger.info(f"[Auth] ✅ Đăng nhập thành công: {self.cfg.username}")
+                logger.info(f"[Auth] ✅ Login successful: {self.cfg.username}")
                 return True
 
-            logger.error(f"[Auth] ❌ Đăng nhập thất bại. URL cuối: {current_resp.url}")
+            logger.error(f"[Auth] Login failed. URL cuối: {current_resp.url}")
             return False
 
         except requests.RequestException as e:
-            logger.error(f"[Auth] Lỗi kết nối: {e}")
+            logger.error(f"[Auth] Connection error: {e}")
             return False
 
     def _follow_redirects(self, resp: requests.Response, max_steps: int = 10) -> Optional[requests.Response]:
@@ -188,7 +188,7 @@ class BaseScraper(ABC):
 
             # Xác nhận có code/state (đây là OIDC response)
             if "code" in form_data or "state" in form_data:
-                logger.debug(f"[Auth] Tìm thấy OIDC form: action={action}, fields={list(form_data.keys())}")
+                logger.debug(f"[Auth] Found OIDC form: action={action}, fields={list(form_data.keys())}")
                 return action, form_data
 
         # Fallback: lấy form đầu tiên có method=post và có hidden inputs
@@ -257,11 +257,11 @@ class BaseScraper(ABC):
                 # Bị redirect về login → session hết hạn
                 if "/account/login" in resp.url.lower() or "/login?" in resp.url.lower():
                     if attempt < retry:
-                        logger.info("[Auth] Session hết hạn, đăng nhập lại...")
+                        logger.info("[Auth] Session expired, re-logging in...")
                         self._logged_in = False
                         if self.login():
                             continue
-                    logger.error("[Auth] Không thể đăng nhập lại")
+                    logger.error("[Auth] Re-login failed")
                     return None
 
                 if resp.status_code == 200:
@@ -290,13 +290,13 @@ class BaseScraper(ABC):
         from pathlib import Path
         team_file = Path("team.json")
         if not team_file.exists():
-            logger.warning("[Scraper] Không tìm thấy team.json")
+            logger.warning("[Scraper] team.json not found")
             return []
         try:
             with open(team_file, encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.error(f"[Scraper] Lỗi đọc team.json: {e}")
+            logger.error(f"[Scraper] Error reading team.json: {e}")
             return []
 
     @abstractmethod

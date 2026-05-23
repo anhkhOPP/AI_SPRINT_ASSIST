@@ -94,7 +94,7 @@ class TaskScheduler:
             # 16:00 T2-T6: nhắc chuẩn bị sprint review
             (self.task_sprint_review_prep,
              CronTrigger(day_of_week=wd, hour=16, minute=0, timezone=tz),
-             "Nhắc chuẩn bị Sprint Review"),
+             "Sprint Review prep reminder"),
 
             # 17:30 T2-T6: nhắc log work cuối ngày
             (self.task_logwork_reminder,
@@ -111,7 +111,7 @@ class TaskScheduler:
                 misfire_grace_time=120,
             )
 
-        logger.info(f"[Scheduler] Đã đăng ký {len(jobs)} jobs")
+        logger.info(f"[Scheduler] Registered {len(jobs)} jobs")
 
     # ------------------------------------------------------------------
     # Task implementations
@@ -152,13 +152,13 @@ class TaskScheduler:
             msg = MessageTemplates.missing_logwork_report(missing, min_hours, yesterday)
             self.bot.notify_missing_logwork(msg)
 
-            # Cảnh báo thêm nếu quá nhiều người thiếu
+            # Cảnh báo thêm nếu quá nhiều người missing
             if len(missing) >= self.cfg.alert_threshold:
                 self.bot.send_group(
                     f"🚨 Có *{len(missing)} người* chưa log work đủ giờ!\n"
                     "PM/Lead cần follow up ngay!"
                 )
-            logger.info(f"[Task] ✅ Check logwork: {len(missing)} thiếu")
+            logger.info(f"[Task] ✅ Logwork check: {len(missing)} missing")
         except Exception as e:
             logger.error(f"[Task:check_logwork] {e}\n{traceback.format_exc()}")
 
@@ -179,7 +179,7 @@ class TaskScheduler:
             if submitted_entries:
                 self._task_ai_daily_summary(submitted_entries)
 
-            logger.info(f"[Task] ✅ Check daily: {len(missing)} chưa điền")
+            logger.info(f"[Task] ✅ Daily check: {len(missing)} chưa điền")
         except Exception as e:
             logger.error(f"[Task:check_daily] {e}\n{traceback.format_exc()}")
 
@@ -199,7 +199,7 @@ class TaskScheduler:
                 days_remaining=sprint.days_remaining(),
             )
 
-            if summary and summary.strip() != "✅ Daily bình thường, không có blockers.":
+            if summary and summary.strip() != "✅ Daily bình thường, none blockers.":
                 msg = f"🤖 *AI DAILY INSIGHT*\n\n{summary}"
                 self.bot.send_group(msg)
                 logger.info("[Task] ✅ Gửi AI daily summary")
@@ -215,13 +215,13 @@ class TaskScheduler:
             # Nếu đã có lịch và chưa đến ngày thì không hỏi lại
             existing = sprint.get_event("review")
             if existing and existing.days_until() > 0:
-                logger.info(f"[Task] Sprint Review đã có lịch: {existing.scheduled_date}, bỏ qua")
+                logger.info(f"[Task] Sprint Review already scheduled: {existing.scheduled_date}, bỏ qua")
                 return
 
             public_url = self.cfg.bot_server.public_url
             msg = MessageTemplates.ask_pm_sprint_review(sprint.name, public_url)
             self.bot.ask_pm_sprint_review(msg)
-            logger.info("[Task] ✅ Đã hỏi PM lịch Sprint Review qua DM")
+            logger.info("[Task] ✅ Asked PM for Sprint Review schedule via DM")
         except Exception as e:
             logger.error(f"[Task:ask_review] {e}")
 
@@ -232,7 +232,7 @@ class TaskScheduler:
 
             # Chỉ hỏi khi đang trong tuần cuối sprint
             if not self.sprint_manager.is_sprint_week_ending():
-                logger.info(f"[Task] Sprint chưa gần kết thúc (còn {sprint.days_remaining()} ngày), bỏ qua")
+                logger.info(f"[Task] Sprint not ending soon (remaining {sprint.days_remaining()} ngày), bỏ qua")
                 return
 
             # Tính tên sprint tiếp theo
@@ -245,7 +245,7 @@ class TaskScheduler:
             public_url = self.cfg.bot_server.public_url
             msg = MessageTemplates.ask_pm_sprint_planning(sprint.name, next_name, public_url)
             self.bot.ask_pm_sprint_planning(msg)
-            logger.info("[Task] ✅ Đã hỏi PM lịch Sprint Planning qua DM")
+            logger.info("[Task] ✅ Asked PM for Sprint Planning schedule via DM")
         except Exception as e:
             logger.error(f"[Task:ask_planning] {e}")
 
@@ -271,7 +271,7 @@ class TaskScheduler:
                 sprint.name, date_display, days_until, event.meeting_link, meeting_room
             )
             self.bot.notify_sprint_review_prep(msg)
-            logger.info(f"[Task] ✅ Nhắc chuẩn bị Sprint Review (còn {days_until} ngày)")
+            logger.info(f"[Task] ✅ Sprint Review prep reminder (remaining {days_until} ngày)")
         except Exception as e:
             logger.error(f"[Task:review_prep] {e}")
 
@@ -295,7 +295,7 @@ class TaskScheduler:
         }
         fn = tasks.get(task_id)
         if not fn:
-            logger.error(f"Task không tồn tại: {task_id}. Có: {list(tasks.keys())}")
+            logger.error(f"Task not found: {task_id}. Có: {list(tasks.keys())}")
             return False
         logger.info(f"[Scheduler] Chạy ngay: {task_id}")
         fn()

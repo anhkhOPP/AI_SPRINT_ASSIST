@@ -27,7 +27,7 @@ class GeminiAI:
         self.enabled = cfg.gemini.is_enabled()
 
         if not self.enabled:
-            logger.warning("[Gemini] API key chưa cấu hình (GEMINI_API_KEY). AI features bị tắt.")
+            logger.warning("[Gemini] API key not configured (GEMINI_API_KEY). AI features bị tắt.")
 
     # ------------------------------------------------------------------
     # Tính năng 1: Parse lịch họp từ ngôn ngữ tự nhiên
@@ -51,13 +51,13 @@ Từ đoạn văn sau, hãy trích xuất thông tin và trả về JSON:
 "{text}"
 
 Trả về JSON với các trường:
-- date: ngày họp dạng DD/MM (ví dụ: "26/05"), để trống nếu không có
-- time: giờ họp dạng HH:MM 24h (ví dụ: "14:00"), để trống nếu không có  
-- room: tên phòng họp (ví dụ: "Phòng A3"), để trống nếu không có
-- link: link meeting nếu có, để trống nếu không có
+- date: ngày họp dạng DD/MM (ví dụ: "26/05"), để trống nếu none
+- time: giờ họp dạng HH:MM 24h (ví dụ: "14:00"), để trống nếu none  
+- room: tên phòng họp (ví dụ: "Phòng A3"), để trống nếu none
+- link: link meeting nếu có, để trống nếu none
 - event_type: "review" nếu là sprint review, "planning" nếu là sprint planning
 
-Chỉ trả về JSON thuần túy, không có text thêm."""
+Chỉ trả về JSON thuần túy, none text thêm."""
 
         response = self._call_api(prompt)
         if not response:
@@ -92,7 +92,7 @@ Chỉ trả về JSON thuần túy, không có text thêm."""
 
         prompt = f"""Bạn là Scrum Master AI, hãy tóm tắt daily standup của nhóm phát triển phần mềm.
 
-Sprint: {sprint_name} (còn {days_remaining} ngày)
+Sprint: {sprint_name} (remaining {days_remaining} ngày)
 
 Nội dung daily hôm nay:
 {daily_content}
@@ -100,13 +100,13 @@ Nội dung daily hôm nay:
 Hãy phân tích và trả về tóm tắt ngắn gọn bằng tiếng Việt, bao gồm:
 1. Các blockers/vấn đề cần giải quyết ngay (nếu có)
 2. Những điểm cần chú ý hoặc tiềm ẩn rủi ro (nếu có)
-3. Nhận xét ngắn về tiến độ sprint (nếu cần)
+3. Received xét ngắn về tiến độ sprint (nếu cần)
 
 Yêu cầu:
 - Ngắn gọn, súc tích (tối đa 5-6 dòng)
 - Chỉ nêu những điểm quan trọng, bỏ qua nếu mọi thứ bình thường
 - Dùng emoji phù hợp
-- Nếu không có gì đặc biệt, chỉ cần trả về: "✅ Daily bình thường, không có blockers."
+- Nếu none gì đặc biệt, chỉ cần trả về: "✅ Daily bình thường, none blockers."
 - KHÔNG liệt kê lại toàn bộ công việc của từng người"""
 
         response = self._call_api(prompt)
@@ -154,21 +154,21 @@ Yêu cầu:
 
                 if resp.status_code == 429:
                     wait = 10 * (attempt + 1)  # 10s, 20s, 30s
-                    logger.warning(f"[Gemini] Rate limit, chờ {wait}s (lần {attempt+1}/{retry})")
+                    logger.warning(f"[Gemini] Rate limit, waiting {wait}s (lần {attempt+1}/{retry})")
                     time.sleep(wait)
                     continue
 
-                logger.error(f"[Gemini] API lỗi {resp.status_code}: {resp.text[:200]}")
+                logger.error(f"[Gemini] API error {resp.status_code}: {resp.text[:200]}")
                 return None
 
             except requests.RequestException as e:
                 if attempt < retry - 1:
                     time.sleep(5)
                 else:
-                    logger.error(f"[Gemini] Kết nối lỗi: {e}")
+                    logger.error(f"[Gemini] Connection error: {e}")
                     return None
 
-        logger.error("[Gemini] Hết số lần retry")
+        logger.error("[Gemini] Max retries exceeded")
         return None
 
     def _parse_json_response(self, text: str) -> Optional[Dict[str, str]]:
@@ -176,7 +176,7 @@ Yêu cầu:
         # Tìm JSON trong response (có thể có markdown code block)
         json_match = re.search(r"\{[^{}]+\}", text, re.DOTALL)
         if not json_match:
-            logger.warning(f"[Gemini] Không tìm thấy JSON trong response: {text[:100]}")
+            logger.warning(f"[Gemini] JSON not found in response: {text[:100]}")
             return None
 
         try:
@@ -190,7 +190,7 @@ Yêu cầu:
                 "event_type": data.get("event_type", "review").strip(),
             }
         except json.JSONDecodeError as e:
-            logger.error(f"[Gemini] JSON parse lỗi: {e}")
+            logger.error(f"[Gemini] JSON parse error: {e}")
             return None
 
     @staticmethod

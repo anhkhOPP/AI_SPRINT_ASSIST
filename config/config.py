@@ -16,7 +16,7 @@ def _require(key: str) -> str:
     val = os.getenv(key, "").strip()
     if not val:
         raise EnvironmentError(
-            f"Biến môi trường bắt buộc '{key}' chưa được cấu hình. Kiểm tra file .env"
+            f"Required env variable '{key}' not configured. Check .env file"
         )
     return val
 
