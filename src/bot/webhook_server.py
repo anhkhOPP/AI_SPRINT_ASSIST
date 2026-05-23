@@ -272,6 +272,42 @@ def health():
     return jsonify({"status": "ok", "service": "AI Sprint Assistant"})
 
 
+@app.route("/set_review", methods=["GET"])
+def api_set_review():
+    """
+    PM dùng URL này để đặt lịch Sprint Review.
+    Ví dụ: /set_review?date=26/05&time=14:00&room=Phòng A3&link=https://meet.google.com/xxx
+    """
+    date_str = request.args.get("date", "")
+    time_str = request.args.get("time", "14:00")
+    room = request.args.get("room", "")
+    link = request.args.get("link", "")
+
+    if not date_str:
+        return jsonify({"error": "Thiếu tham số 'date'. VD: ?date=26/05&time=14:00&room=Phòng A3"}), 400
+
+    result = handle_pm_message(f"/set_review {date_str} {time_str} {room} {link}", "PM")
+    return jsonify({"result": result})
+
+
+@app.route("/set_planning", methods=["GET"])
+def api_set_planning():
+    """
+    PM dùng URL này để đặt lịch Sprint Planning.
+    Ví dụ: /set_planning?date=27/05&time=09:00&room=Phòng B2
+    """
+    date_str = request.args.get("date", "")
+    time_str = request.args.get("time", "09:00")
+    room = request.args.get("room", "")
+    link = request.args.get("link", "")
+
+    if not date_str:
+        return jsonify({"error": "Thiếu tham số 'date'. VD: ?date=27/05&time=09:00"}), 400
+
+    result = handle_pm_message(f"/set_planning {date_str} {time_str} {room} {link}", "PM")
+    return jsonify({"result": result})
+
+
 def run_server():
     cfg = get_config()
     logger.info(f"[Server] Khởi động tại {cfg.bot_server.host}:{cfg.bot_server.port}")
